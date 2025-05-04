@@ -1,3 +1,4 @@
+// chargePointSimulator.js
 import WebSocket from "ws";
 
 const ocppServerUrl = "ws://localhost:5000";
@@ -23,6 +24,7 @@ ws.on("open", () => {
 ws.on("message", (data) => {
   const message = JSON.parse(data);
   console.log("Received OCPP message:", message);
+
   if (message[2] === "RemoteStartTransaction") {
     console.log("Starting transaction...");
     setTimeout(() => {
@@ -42,8 +44,15 @@ ws.on("message", (data) => {
         timestamp: new Date().toISOString(),
       });
     }, 1000);
+  } else if (message[2] === "StatusNotification") {
+    console.log("StatusNotification received");
+  } else if (message[2] === "StartTransaction") {
+    console.log("StartTransaction received");
+  } else if (message[2] === "StopTransaction") {
+    console.log("StopTransaction received");
   }
 });
+
 ws.on("close", () => {
   console.log("Disconnected from OCPP server");
 });

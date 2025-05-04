@@ -1,90 +1,73 @@
+// SignUp.tsx
 import { useState } from "react";
 import { Alert, Image, ScrollView, Text, View } from "react-native";
 import { ReactNativeModal } from "react-native-modal";
 import { Link, router } from "expo-router";
-import { supabase } from "@/utils/supabase"; // Assuming you've set up Supabase client
-
 import CustomButton from "@/components/CustomButton";
 import InputField from "@/components/InputField";
-import OAuth from "@/components/OAuth";
 import { icons, images } from "@/constants";
 import { fetchAPI } from "@/lib/fetch";
 
 const SignUp = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-
   const [form, setForm] = useState({
     name: "",
     email: "",
     password: "",
   });
-  const [verification, setVerification] = useState({
-    state: "default",
-    error: "",
-    code: "",
+  const [errors, setErrors] = useState({
+    name: "",
+    email: "",
+    password: "",
   });
 
-  const onSignUpPress = async () => {
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: {
-          emailRedirectTo: "your-redirect-url-here", // Use your app URL for email verification redirects
-        },
-      });
+  // Email validation regex
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  // Password validation regex (at least 8 characters, including letters and numbers)
+  const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
 
-      if (error) {
-        throw error;
-      }
+  const validateForm = () => {
+    let hasErrors = false;
+    const newErrors = { name: "", email: "", password: "" };
 
-      if (data.user) {
-        setVerification({
-          ...verification,
-          state: "pending",
-        });
-        Alert.alert("Success", "Check your email for the verification code.");
-      }
-    } catch (err: any) {
-      console.log(JSON.stringify(err, null, 2));
-      Alert.alert("Error", err.message || "Something went wrong.");
+    if (!form.name.trim()) {
+      newErrors.name = "Name is required";
+      hasErrors = true;
     }
+
+    if (!emailRegex.test(form.email)) {
+      newErrors.email = "Please enter a valid email address";
+      hasErrors = true;
+    }
+
+    if (!passwordRegex.test(form.password)) {
+      newErrors.password =
+        "Password must be at least 8 characters with letters and numbers";
+      hasErrors = true;
+    }
+
+    setErrors(newErrors);
+    return !hasErrors;
   };
 
-  const onPressVerify = async () => {
+  const onSignUpPress = async () => {
+    if (!validateForm()) return;
+
     try {
-      // No manual code verification needed here as Supabase handles email verification automatically
-      const { data, error } = await supabase.auth.updateUser({
-        email: form.email,
-        password: form.password,
+      const response = await fetchAPI("/sign-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
       });
 
-      if (error) {
-        throw error;
-      }
-
-      if (data.user) {
-        await fetchAPI("/(api)/user", {
-          method: "POST",
-          body: JSON.stringify({
-            name: form.name,
-            email: form.email,
-            supabaseId: data.user.id,
-          }),
-        });
-
-        setVerification({
-          ...verification,
-          state: "success",
-        });
+      if (response.token) {
         setShowSuccessModal(true);
+      } else {
+        Alert.alert("Signup Error", response.error || "Signup failed");
       }
-    } catch (err: any) {
-      setVerification({
-        ...verification,
-        error: err.message || "Verification failed. Please try again.",
-        state: "failed",
-      });
+    } catch (error) {
+      console.error("Sign-up error:", error);
+      Alert.alert("Signup Error", "Something went wrong. Please try again.");
     }
   };
 
@@ -104,7 +87,10 @@ const SignUp = () => {
             icon={icons.person}
             value={form.name}
             onChangeText={(value) => setForm({ ...form, name: value })}
+            error={errors.name}
           />
+          <Text className="text-red-500 text-xs mt-1">{errors.name}</Text>
+
           <InputField
             label="Email"
             placeholder="Enter email"
@@ -112,7 +98,10 @@ const SignUp = () => {
             textContentType="emailAddress"
             value={form.email}
             onChangeText={(value) => setForm({ ...form, email: value })}
+            error={errors.email}
           />
+          <Text className="text-red-500 text-xs mt-1">{errors.email}</Text>
+
           <InputField
             label="Password"
             placeholder="Enter password"
@@ -121,13 +110,15 @@ const SignUp = () => {
             textContentType="password"
             value={form.password}
             onChangeText={(value) => setForm({ ...form, password: value })}
+            error={errors.password}
           />
+          <Text className="text-red-500 text-xs mt-1">{errors.password}</Text>
+
           <CustomButton
             title="Sign Up"
             onPress={onSignUpPress}
             className="mt-6"
           />
-          <OAuth />
           <Link
             href="/sign-in"
             className="text-lg text-center text-general-200 mt-10"
@@ -136,43 +127,6 @@ const SignUp = () => {
             <Text className="text-primary-500">Log In</Text>
           </Link>
         </View>
-        <ReactNativeModal
-          isVisible={verification.state === "pending"}
-          onModalHide={() => {
-            if (verification.state === "success") {
-              setShowSuccessModal(true);
-            }
-          }}
-        >
-          <View className="bg-white px-7 py-9 rounded-2xl min-h-[300px]">
-            <Text className="font-JakartaExtraBold text-2xl mb-2">
-              Verification
-            </Text>
-            <Text className="font-Jakarta mb-5">
-              We've sent a verification code to {form.email}.
-            </Text>
-            <InputField
-              label={"Code"}
-              icon={icons.lock}
-              placeholder={"12345"}
-              value={verification.code}
-              keyboardType="numeric"
-              onChangeText={(code) =>
-                setVerification({ ...verification, code })
-              }
-            />
-            {verification.error && (
-              <Text className="text-red-500 text-sm mt-1">
-                {verification.error}
-              </Text>
-            )}
-            <CustomButton
-              title="Verify Email"
-              onPress={onPressVerify}
-              className="mt-5 bg-success-500"
-            />
-          </View>
-        </ReactNativeModal>
         <ReactNativeModal isVisible={showSuccessModal}>
           <View className="bg-white px-7 py-9 rounded-2xl min-h-[300px]">
             <Image
@@ -180,10 +134,10 @@ const SignUp = () => {
               className="w-[110px] h-[110px] mx-auto my-5"
             />
             <Text className="text-3xl font-JakartaBold text-center">
-              Verified
+              Account Created
             </Text>
             <Text className="text-base text-gray-400 font-Jakarta text-center mt-2">
-              You have successfully verified your account.
+              Welcome to the platform!
             </Text>
             <CustomButton
               title="Browse Home"

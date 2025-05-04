@@ -16,6 +16,7 @@ import {
   createReservation,
   fetchConnectorDetails,
 } from "@/lib/fetch";
+import { useUser } from "@/contexts/UserContext";
 
 interface Reservation {
   id: number;
@@ -39,6 +40,7 @@ const ReservationScreen = () => {
     power: number;
     locationName: string;
   } | null>(null);
+  const { user } = useUser();
 
   // Format the selected time to HH:MM:SS
   const formatTimeForDatabase = (date: Date) => {
@@ -122,7 +124,7 @@ const ReservationScreen = () => {
 
   // Handle reservation submission
   const handleSubmit = useCallback(async () => {
-    if (!connectorId) return;
+    if (!connectorId || !user) return;
 
     const duration = parseInt(selectedDuration);
     if (isNaN(duration) || duration <= 0) {
@@ -134,13 +136,21 @@ const ReservationScreen = () => {
     setError(null);
 
     try {
-      // Format time for the database
-      const dbFormattedTime = formatTimeForDatabase(selectedTime);
+      // Check for time conflicts using normalized times
+      if (isTimeConflicted()) {
+        setError(
+          "Selected time conflicts with an existing reservation. Please choose another time.",
+        );
+        setLoading(false);
+        return;
+      }
 
+      const dbFormattedTime = formatTimeForDatabase(selectedTime);
       await createReservation({
         connector_id: parseInt(connectorId),
         arrival_time: dbFormattedTime,
         duration: duration,
+        user_id: user.id,
       });
 
       const updated = await fetchReservations(parseInt(connectorId));
@@ -152,7 +162,7 @@ const ReservationScreen = () => {
     } finally {
       setLoading(false);
     }
-  }, [connectorId, selectedTime, selectedDuration, router]);
+  }, [connectorId, selectedTime, selectedDuration, router, user, reservations]);
 
   // Generate hourly time slots for the day
   const generateHourlySlots = () => {
@@ -197,6 +207,30 @@ const ReservationScreen = () => {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
+    });
+  };
+
+  const isTimeConflicted = () => {
+    // Normalize selected time to base date (1970-01-01)
+    const normalizedSelectedStartTime = new Date(
+      `1970-01-01T${formatTimeForDatabase(selectedTime)}`,
+    );
+    const durationInMinutes = parseInt(selectedDuration);
+    const normalizedSelectedEndTime = new Date(
+      normalizedSelectedStartTime.getTime() + durationInMinutes * 60000,
+    );
+
+    return reservations.some((reservation) => {
+      const resStartTime = new Date(`1970-01-01T${reservation.arrival_time}`);
+      const resEndTime = new Date(
+        resStartTime.getTime() + reservation.duration * 60000,
+      );
+
+      // Standard interval overlap check
+      return (
+        normalizedSelectedStartTime < resEndTime &&
+        resStartTime < normalizedSelectedEndTime
+      );
     });
   };
 
@@ -326,6 +360,7 @@ const ReservationScreen = () => {
             onChange={handleTimeChange}
             locale="en-GB-u-hc-h23"
             is24Hour={true}
+            minuteInterval={5}
           />
         )}
       </Animated.View>

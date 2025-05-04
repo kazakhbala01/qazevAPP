@@ -34,6 +34,23 @@ export type LocationCoords = {
 // Base URL for the Express.js backend
 const BASE_URL = "http://192.168.1.71:5000/api"; // Replace with your backend URL
 
+export const fetchAPI = async (url: string, options: RequestInit = {}) => {
+  const fullUrl = `${BASE_URL}${url.startsWith("/") ? url : "/" + url}`;
+  try {
+    const response = await fetch(fullUrl, options);
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Request failed");
+    }
+
+    return data;
+  } catch (error) {
+    console.error("API error:", error);
+    throw error;
+  }
+};
+
 // Fetch locations with nested stations and connectors
 export const fetchLocations = async (): Promise<LocationData[]> => {
   try {
@@ -48,50 +65,35 @@ export const fetchLocations = async (): Promise<LocationData[]> => {
 };
 
 // Start charging via backend API
-export const startCharging = async (connectorId: number, idTag: string) => {
+export const startChargingSession = async (
+  connectorId: number,
+  userId: number,
+) => {
   try {
     const response = await fetch(`${BASE_URL}/start-charge`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ connectorId, idTag }),
+      body: JSON.stringify({ connectorId, userId }),
     });
-    if (!response.ok) throw new Error("Failed to start charging");
+    if (!response.ok) throw new Error("Failed to start charging session");
     return await response.json();
   } catch (error) {
-    console.error("Error starting charging:", error);
+    console.error("Error starting charging session:", error);
     throw error;
   }
 };
-// Stop charging via backend API
-// Stop charging via backend API
-export const stopCharging = async (
-  connectorId: number,
-  transactionId: number,
-) => {
+
+export const stopChargingSession = async (transactionId: string) => {
   try {
-    console.log("Stopping charging:", { connectorId, transactionId });
-
-    // Validate input
-    if (!connectorId || !transactionId) {
-      throw new Error("Missing required fields: connectorId or transactionId");
-    }
-
-    // Send request to backend
-    const response = await fetch(`${BASE_URL}/stop-charge`, {
+    const response = await fetch(`${BASE_URL}/stop-charge-session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ connectorId, transactionId }),
+      body: JSON.stringify({ transactionId }),
     });
-
-    // Check for errors
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData?.error || "Failed to stop charging");
-    }
-
+    if (!response.ok) throw new Error("Failed to stop charging session");
     return await response.json();
   } catch (error) {
-    console.error("Error stopping charging:", error);
+    console.error("Error stopping charging session:", error);
     throw error;
   }
 };
@@ -109,6 +111,39 @@ export const fetchUserLocation = async (): Promise<LocationCoords | null> => {
   } catch (error) {
     console.error("Error fetching user location:", error);
     return null;
+  }
+};
+
+export const startTransaction = async (connectorId: number, userId: number) => {
+  try {
+    const transactionId = Math.floor(
+      100000 + Math.random() * 900000,
+    ).toString();
+    const response = await fetch(`${BASE_URL}/start-transaction`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ connectorId, userId, transactionId }),
+    });
+    if (!response.ok) throw new Error("Failed to start transaction");
+    return await response.json();
+  } catch (error) {
+    console.error("Error starting transaction:", error);
+    throw error;
+  }
+};
+
+export const stopTransaction = async (transactionId: string) => {
+  try {
+    const response = await fetch(`${BASE_URL}/stop-transaction`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transactionId }),
+    });
+    if (!response.ok) throw new Error("Failed to stop transaction");
+    return await response.json();
+  } catch (error) {
+    console.error("Error stopping transaction:", error);
+    throw error;
   }
 };
 
@@ -213,7 +248,9 @@ export const fetchReservations = async (
   connectorId: number,
 ): Promise<Reservation[]> => {
   try {
-    const response = await fetch(`${BASE_URL}/reservations/${connectorId}`);
+    const response = await fetch(
+      `${BASE_URL}/reservations/connector/${connectorId}`,
+    );
     if (!response.ok) {
       throw new Error("Failed to fetch reservations");
     }
@@ -240,6 +277,7 @@ export const createReservation = async (reservation: {
   connector_id: number;
   arrival_time: string;
   duration: number;
+  user_id: number; // Add user_id
 }): Promise<Reservation> => {
   try {
     const response = await fetch(`${BASE_URL}/reservations`, {
@@ -249,11 +287,9 @@ export const createReservation = async (reservation: {
       },
       body: JSON.stringify(reservation),
     });
-
     if (!response.ok) {
       throw new Error("Failed to create reservation");
     }
-
     return await response.json();
   } catch (error) {
     console.error("Error creating reservation:", error);

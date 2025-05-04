@@ -1,37 +1,73 @@
+// SignIn.tsx
 import { Image, ScrollView, Text, View, Alert } from "react-native";
 import { icons, images } from "@/constants";
 import InputField from "@/components/InputField";
 import { useState } from "react";
 import CustomButton from "@/components/CustomButton";
 import { Link, router } from "expo-router";
-import OAuth from "@/components/OAuth";
-import { supabase } from "@/utils/supabase"; // Adjust the path based on your folder structure
-import "@/global.css";
+import { fetchAPI } from "@/lib/fetch";
+import { useUser } from "@/contexts/UserContext";
+
 const SignIn = () => {
   const [form, setForm] = useState({
     email: "",
     password: "",
   });
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({
+    email: "",
+    password: "",
+  });
 
-  const onSignInPress = async () => {
-    setLoading(true);
-    const { email, password } = form;
+  const { setUser } = useUser();
 
-    // Sign in using Supabase
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+  // Email validation regex
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  // Password validation regex (at least 8 characters, including letters and numbers)
+  const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
 
-    if (error) {
-      Alert.alert("Login Error", error.message); // Display error if login fails
-    } else {
-      router.push(`/(root)/(tabs)/home`);
-      // router.push("/home"); // Example route
+  const validateForm = () => {
+    let hasErrors = false;
+    const newErrors = { email: "", password: "" };
+
+    if (!emailRegex.test(form.email)) {
+      newErrors.email = "Please enter a valid email address";
+      hasErrors = true;
     }
 
-    setLoading(false);
+    if (!passwordRegex.test(form.password)) {
+      newErrors.password =
+        "Password must be at least 8 characters with letters and numbers";
+      hasErrors = true;
+    }
+
+    setErrors(newErrors);
+    return !hasErrors;
+  };
+
+  const onSignInPress = async () => {
+    if (!validateForm()) return;
+    setLoading(true);
+    const { email, password } = form;
+    try {
+      const response = await fetchAPI("/sign-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (response.token) {
+        console.log("Login successful. User data:", response.user); // Add this line
+        setUser(response.user);
+        router.push(`/(root)/(tabs)/home`);
+      } else {
+        Alert.alert("Login Error", response.error || "Invalid credentials");
+      }
+    } catch (error) {
+      console.error("Sign-in error:", error);
+      Alert.alert("Login Error", "Invalid credentials");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -50,7 +86,10 @@ const SignIn = () => {
             icon={icons.email}
             value={form.email}
             onChangeText={(value) => setForm({ ...form, email: value })}
+            error={errors.email}
           />
+          <Text className="text-red-500 text-xs mt-1">{errors.email}</Text>
+
           <InputField
             label="Password"
             placeholder="Enter your Password"
@@ -58,16 +97,16 @@ const SignIn = () => {
             secureTextEntry={true}
             value={form.password}
             onChangeText={(value) => setForm({ ...form, password: value })}
+            error={errors.password}
           />
+          <Text className="text-red-500 text-xs mt-1">{errors.password}</Text>
+
           <CustomButton
             title="Sign In"
             onPress={onSignInPress}
-            loading={loading} // Pass loading state to the button
+            loading={loading}
             className="mt-6"
           />
-
-          <OAuth />
-
           <Link
             href="/sign-up"
             className="text-lg text-center text-general-200 mt-10"

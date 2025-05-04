@@ -11,6 +11,10 @@ const Layout = () => {
         name="reservation/[connectorId]"
         options={{ headerShown: false }}
       />
+      <Stack.Screen
+        name="reservation/details/[reservationId]"
+        options={{ headerShown: false }}
+      />
     </Stack>
   );
 };

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   Dimensions,
+  Alert,
 } from "react-native";
 import MapView, { Marker, Callout } from "react-native-maps";
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/lib/fetch";
 import { router } from "expo-router";
 import { styles } from "@/assets/styles/styles";
+import { useUser } from "@/contexts/UserContext";
 
 const { height: screenHeight } = Dimensions.get("window");
 
@@ -35,7 +37,7 @@ const Home = () => {
   const [selectedConnectorId, setSelectedConnectorId] = useState<number | null>(
     null,
   );
-
+  const { user } = useUser();
   // Auto-refresh data every 30 seconds
   useEffect(() => {
     const intervalId = setInterval(refetch, 30000);
@@ -52,7 +54,12 @@ const Home = () => {
   // Handle marker press
   const handleMarkerPress = (location: LocationData) => {
     setSelectedLocation(location);
-    setSelectedStationId(null);
+    if (location.stations.length === 1) {
+      setSelectedStationId(location.stations[0].id);
+    } else {
+      setSelectedStationId(null);
+    }
+
     setSelectedConnectorId(null);
     setModalVisible(true);
     if (mapRef.current) {
@@ -68,20 +75,27 @@ const Home = () => {
     }
   };
 
-  // Show charging form when Connect is pressed
   const handleConnectPress = () => {
-    if (!selectedConnectorId) return;
+    if (!selectedConnectorId || !user) {
+      Alert.alert("Error", "Please log in.");
+      return;
+    }
+    const idTag = user.id.toString(); // Use the logged-in user's ID as the idTag
     router.push({
-      pathname: "/charge",
+      pathname: "/(root)/(activities)/chargeStart",
       params: {
         connectorId: selectedConnectorId,
-        idTag: "user_123",
+        idTag, // Pass the actual user ID
       },
     });
   };
-
   // Navigate to reservation screen
   const handleReservePress = () => {
+    setModalVisible(false);
+    if (!selectedConnectorId || !user) {
+      Alert.alert("Attention", "Please log in first.");
+      return;
+    }
     if (selectedConnectorId) {
       router.push(
         `/(root)/(activities)/reservation/${String(selectedConnectorId)}`,
@@ -199,7 +213,12 @@ const Home = () => {
               <View
                 style={[
                   styles.stationMarker,
-                  { borderColor: getMarkerColor(station.status) },
+                  {
+                    borderColor:
+                      selectedLocation?.id === loc.id
+                        ? "#1e88e5"
+                        : getMarkerColor(station.status),
+                  },
                 ]}
               >
                 <Text
@@ -211,10 +230,9 @@ const Home = () => {
                 >
                   {loc.capacity > 1
                     ? loc.capacity
-                    : `${station.connectors[0]?.power || 0} kW`}{" "}
+                    : `${station.connectors[0]?.power || 0} kW`}
                 </Text>
               </View>
-              <Callout tooltip={true}></Callout>
             </Marker>
           )),
         )}
@@ -235,7 +253,10 @@ const Home = () => {
         animationType="slide"
         transparent
         visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => {
+          setModalVisible(false);
+          setSelectedLocation(null); // Reset selected location
+        }}
       >
         <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
           <View style={styles.modalOverlay}>
@@ -245,7 +266,10 @@ const Home = () => {
                   <>
                     <TouchableOpacity
                       style={styles.closeIcon}
-                      onPress={() => setModalVisible(false)}
+                      onPress={() => {
+                        setModalVisible(false);
+                        setSelectedLocation(null);
+                      }}
                     >
                       <Text style={styles.closeIconText}>×</Text>
                     </TouchableOpacity>
