@@ -38,7 +38,25 @@ export const styles = StyleSheet.create({
     textDecorationLine: "underline",
     fontWeight: "bold",
   },
-
+  stationDetailsContainer: {
+    flex: 2, // Take 75% of the width
+    marginRight: 15, // Add space between text and icons
+  },
+  connectorIconsContainer: {
+    flex: 1, // Take 25% of the width
+    justifyContent: "flex-end", // Align icons to the end (right side)
+    alignItems: "center", // Center icons vertically
+    flexDirection: "row", // Display icons in a row
+  },
+  connectorIcons: {
+    width: 40,
+    height: 40,
+    marginRight: 15,
+  },
+  stationDetails: {
+    flex: 1,
+    justifyContent: "center", // Vertically center the text
+  },
   // Map Markers
   userMarker: {
     height: 40,
@@ -130,7 +148,12 @@ export const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 5,
+    textAlign: "center", // Center the title
+  },
+  cardDetails: {
+    fontSize: 16,
+    marginBottom: 4,
     textAlign: "center", // Center the title
   },
   detailsText: {
@@ -147,14 +170,17 @@ export const styles = StyleSheet.create({
     flexWrap: "wrap", // Allow cards to wrap on smaller screens
   },
   connectorCard: {
-    width: 140, // Fixed width
-    height: 140, // Fixed height to make it square
+    width: 164, // Fixed width
+    height: 164, // Fixed height to make it square
     borderWidth: 2,
     borderColor: "#ddd",
     borderRadius: 10,
     padding: 15,
     margin: 10, // Increased space between cards
+    marginBottom: 10,
     backgroundColor: "#f9f9f9", // Light background for better visibility
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   selectedConnector: {
     borderColor: "#007BFF", // Blue border for selected connector
@@ -244,6 +270,7 @@ export const styles = StyleSheet.create({
 
   // Station and Connector Styles
   stationCard: {
+    flexDirection: "row", // Use row layout
     padding: 15,
     borderWidth: 1,
     borderColor: "#ccc",
@@ -255,6 +282,7 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 1,
     elevation: 1,
+    alignItems: "center", // Vertically center content
   },
   selectedStation: {
     borderColor: "#007BFF",
@@ -266,5 +294,9 @@ export const styles = StyleSheet.create({
   capacityText: {
     fontSize: 16,
     fontWeight: "bold",
+  },
+  connectorIcon: {
+    width: 60,
+    height: 60,
   },
 });

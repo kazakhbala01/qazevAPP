@@ -65,39 +65,6 @@ export const fetchLocations = async (): Promise<LocationData[]> => {
 };
 
 // Start charging via backend API
-export const startChargingSession = async (
-  connectorId: number,
-  userId: number,
-) => {
-  try {
-    const response = await fetch(`${BASE_URL}/start-charge`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ connectorId, userId }),
-    });
-    if (!response.ok) throw new Error("Failed to start charging session");
-    return await response.json();
-  } catch (error) {
-    console.error("Error starting charging session:", error);
-    throw error;
-  }
-};
-
-export const stopChargingSession = async (transactionId: string) => {
-  try {
-    const response = await fetch(`${BASE_URL}/stop-charge-session`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transactionId }),
-    });
-    if (!response.ok) throw new Error("Failed to stop charging session");
-    return await response.json();
-  } catch (error) {
-    console.error("Error stopping charging session:", error);
-    throw error;
-  }
-};
-
 // Fetch user's current location
 export const fetchUserLocation = async (): Promise<LocationCoords | null> => {
   try {
@@ -238,6 +205,7 @@ export const getMarkerColor = (status: string) => {
 // @/lib/fetch.ts
 // @/lib/fetch.ts
 export interface Reservation {
+  reservation_date: any;
   id: number;
   connector_id: number;
   arrival_time: string;
@@ -246,14 +214,16 @@ export interface Reservation {
 
 export const fetchReservations = async (
   connectorId: number,
+  date?: string, // Format: YYYY-MM-DD
 ): Promise<Reservation[]> => {
   try {
-    const response = await fetch(
-      `${BASE_URL}/reservations/connector/${connectorId}`,
-    );
-    if (!response.ok) {
-      throw new Error("Failed to fetch reservations");
+    let url = `${BASE_URL}/reservations/connector/${connectorId}`;
+    if (date) {
+      url += `?date=${date}`;
     }
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Failed to fetch reservations");
     return await response.json();
   } catch (error) {
     console.error("Error fetching reservations:", error);
@@ -277,7 +247,8 @@ export const createReservation = async (reservation: {
   connector_id: number;
   arrival_time: string;
   duration: number;
-  user_id: number; // Add user_id
+  user_id: number;
+  reservation_date: string; // Include reservation_date
 }): Promise<Reservation> => {
   try {
     const response = await fetch(`${BASE_URL}/reservations`, {
@@ -293,6 +264,51 @@ export const createReservation = async (reservation: {
     return await response.json();
   } catch (error) {
     console.error("Error creating reservation:", error);
+    throw error;
+  }
+};
+
+export const startChargingSession = async (
+  connectorId: number,
+  userId: number,
+) => {
+  try {
+    const response = await fetch(`${BASE_URL}/start-session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ connectorId, userId }),
+    });
+    if (!response.ok) throw new Error("Failed to start charging session");
+    return await response.json();
+  } catch (error) {
+    console.error("Error starting charging session:", error);
+    throw error;
+  }
+};
+
+// Stop the current charging session
+export const stopChargingSession = async (transactionId: string) => {
+  try {
+    const response = await fetch(`${BASE_URL}/stop-session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transactionId }),
+    });
+    if (!response.ok) throw new Error("Failed to stop charging session");
+    return await response.json();
+  } catch (error) {
+    console.error("Error stopping charging session:", error);
+    throw error;
+  }
+};
+
+export const fetchActiveSession = async (connectorId: number) => {
+  try {
+    const response = await fetch(`${BASE_URL}/active-session/${connectorId}`);
+    if (!response.ok) throw new Error("Failed to fetch active session");
+    return await response.json();
+  } catch (error) {
+    console.error("Error fetching active session:", error);
     throw error;
   }
 };

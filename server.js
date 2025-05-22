@@ -448,8 +448,27 @@ function setupOcppServer(server) {
 
   return wsServer;
 }
+// Broadcast RemoteStartTransaction to all connected charge points
+function broadcastRemoteStartTransaction(wss, connectorId, idTag) {
+  if (!wss) {
+    console.error("WebSocket server not initialized");
+    return;
+  }
 
-// Fetch connector details by connectorId
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(
+        JSON.stringify([
+          2,
+          "msg123",
+          "RemoteStartTransaction",
+          { connectorId, idTag },
+        ]),
+      );
+    }
+  });
+}
+
 app.get("/api/connectors/:connectorId", async (req, res) => {
   const { connectorId } = req.params;
   try {
@@ -481,59 +500,79 @@ app.get("/api/connectors/:connectorId", async (req, res) => {
   }
 });
 
-// Broadcast RemoteStartTransaction to all connected charge points
-function broadcastRemoteStartTransaction(wss, connectorId, idTag) {
-  if (!wss) {
-    console.error("WebSocket server not initialized");
-    return;
-  }
-
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(
-        JSON.stringify([
-          2,
-          "msg123",
-          "RemoteStartTransaction",
-          { connectorId, idTag },
-        ]),
-      );
-    }
-  });
-}
-
-app.get("/api/reservations/connector/:connectorId", async (req, res) => {
-  const { connectorId } = req.params;
-  try {
-    const { rows } = await pool.query(
-      "SELECT * FROM reservations WHERE connector_id = $1",
-      [connectorId],
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error("Error fetching reservations by connector ID:", err);
-    res.status(500).send("Server error");
-  }
-});
-
 app.post("/api/reservations", async (req, res) => {
-  const { connector_id, arrival_time, duration, user_id } = req.body;
+  const { connector_id, arrival_time, duration, user_id, reservation_date } =
+    req.body;
 
-  // Input validation
-  if (!connector_id || !arrival_time || !duration || !user_id) {
+  if (
+    !connector_id ||
+    !arrival_time ||
+    !duration ||
+    !user_id ||
+    !reservation_date
+  ) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
-    // Insert reservation into database
+    // Check for conflicts
+    const newStartTime = new Date(`${reservation_date}T${arrival_time}`);
+    newStartTime.setHours(
+      parseInt(arrival_time.split(":")[0]),
+      parseInt(arrival_time.split(":")[1]),
+      0,
+    );
+    const newEndTime = new Date(newStartTime);
+    newEndTime.setMinutes(newEndTime.getMinutes() + parseInt(duration));
+
+    const existingReservations = await pool.query(
+      "SELECT arrival_time, duration FROM reservations WHERE connector_id = $1 AND reservation_date = $2",
+      [connector_id, reservation_date],
+    );
+
+    let conflictExists = false;
+    for (const res of existingReservations.rows) {
+      const existingStartTime = new Date(
+        `${reservation_date}T${res.arrival_time}`,
+      );
+      existingStartTime.setHours(
+        parseInt(res.arrival_time.split(":")[0]),
+        parseInt(res.arrival_time.split(":")[1]),
+        0,
+      );
+      const existingEndTime = new Date(existingStartTime);
+      existingEndTime.setMinutes(existingEndTime.getMinutes() + res.duration);
+
+      if (newStartTime < existingEndTime && newEndTime > existingStartTime) {
+        conflictExists = true;
+        break;
+      }
+    }
+
+    if (conflictExists) {
+      return res.status(409).json({
+        error: "Reservation time conflicts with existing reservation",
+      });
+    }
+
     const { rows } = await pool.query(
       `
-      INSERT INTO reservations (connector_id, arrival_time, duration, user_id)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO reservations (
+        connector_id,
+        arrival_time,
+        duration,
+        user_id,
+        reservation_date
+      )
+      VALUES ($1, $2, $3, $4, to_date($5, 'YYYY-MM-DD'))
       RETURNING *
     `,
-      [connector_id, arrival_time, duration, user_id],
+      [connector_id, arrival_time, duration, user_id, reservation_date],
     );
+
+    rows[0].reservation_date = rows[0].reservation_date
+      .toISOString()
+      .split("T")[0];
     res.json(rows[0]);
   } catch (err) {
     console.error("Error creating reservation:", err);
@@ -541,25 +580,79 @@ app.post("/api/reservations", async (req, res) => {
   }
 });
 
+// In server.js GET route
+app.get("/api/reservations/connector/:connectorId", async (req, res) => {
+  const { connectorId } = req.params;
+  const { date } = req.query;
+
+  try {
+    let query =
+      "SELECT *, to_char(reservation_date, 'YYYY-MM-DD') as formatted_date FROM reservations WHERE connector_id = $1";
+    let params = [connectorId];
+
+    if (date) {
+      query += ` AND reservation_date = to_date($${params.length + 1}, 'YYYY-MM-DD')`;
+      params.push(date);
+    }
+
+    const { rows } = await pool.query(query, params);
+    res.json(
+      rows.map((row) => ({
+        ...row,
+        reservation_date: row.formatted_date,
+      })),
+    );
+  } catch (err) {
+    console.error("Error fetching reservations by connector ID:", err);
+    res.status(500).send("Server error");
+  }
+});
+// In your server.js
 app.get("/api/reservations/:reservationId", async (req, res) => {
   const { reservationId } = req.params;
+
+  console.log(`Received request for reservation ID: ${reservationId}`);
+
+  if (isNaN(parseInt(reservationId))) {
+    console.log("Invalid reservation ID format");
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid reservation ID" });
+  }
+
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM reservations WHERE id = $1",
+      `
+      SELECT 
+        r.id,
+        r.arrival_time,
+        r.duration,
+        r.connector_id,
+        s.station_number AS station_name,
+        l.name AS location_name
+      FROM reservations r
+      LEFT JOIN connectors c ON r.connector_id = c.id
+      LEFT JOIN stations s ON c.station_id = s.id
+      LEFT JOIN locations l ON s.location_id = l.id
+      WHERE r.id = $1
+      `,
       [reservationId],
     );
+
     if (rows.length === 0) {
+      console.log(`Reservation not found for ID: ${reservationId}`);
       return res
         .status(404)
         .json({ success: false, message: "Reservation not found" });
     }
+
+    console.log(`Found reservation: `, rows[0]);
     res.json({ success: true, data: rows[0] });
   } catch (err) {
     console.error("Error fetching reservation by ID:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
-
 // Endpoint for updating a reservation
 app.put("/api/reservations/:reservationId", async (req, res) => {
   const { reservationId } = req.params;
@@ -592,19 +685,141 @@ app.get("/api/user-reservations", async (req, res) => {
   const { userId } = req.query;
 
   if (!userId) {
-    console.error("Debug: Missing user ID");
     return res.status(400).json({ error: "Missing user ID" });
   }
 
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM reservations WHERE user_id = $1",
+      `
+    SELECT 
+      r.id,
+      r.arrival_time,
+      r.duration,
+      r.reservation_date,
+      r.connector_id,
+      s.station_number AS station_name,  -- Use station_number from stations if needed
+      l.name AS location_name
+    FROM reservations r
+    LEFT JOIN connectors c ON r.connector_id = c.id
+    LEFT JOIN stations s ON c.station_id = s.id
+    LEFT JOIN locations l ON s.location_id = l.id
+    WHERE r.user_id = $1
+  `,
       [userId],
     );
+
     res.json(rows);
   } catch (err) {
-    console.error("Debug: Error fetching user reservations:", err);
+    console.error("Error fetching user reservations:", err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+app.post("/api/start-session", async (req, res) => {
+  try {
+    const { connectorId, userId } = req.body;
+
+    if (!connectorId || !userId) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+
+    // Generate a unique transaction ID
+    const transactionId = Math.floor(
+      100000 + Math.random() * 900000,
+    ).toString();
+
+    // Create the session
+    const { rows } = await pool.query(
+      "INSERT INTO charging_sessions (connector_id, user_id, transaction_id, status) VALUES ($1, $2, $3, 'active') RETURNING *",
+      [connectorId, userId, transactionId],
+    );
+
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    console.error("Error starting charging session:", error);
+    res.status(500).json({ error: "Failed to start charging session" });
+  }
+});
+
+// Stop a charging session
+app.post("/api/stop-session", async (req, res) => {
+  try {
+    const { transactionId } = req.body;
+
+    if (!transactionId) {
+      return res.status(400).json({ error: "Missing transaction ID" });
+    }
+
+    // Update the active session
+    const { rows } = await pool.query(
+      "UPDATE charging_sessions SET end_time = NOW(), status = 'completed' WHERE transaction_id = $1 AND status = 'active' RETURNING *",
+      [transactionId],
+    );
+
+    if (rows.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "Session not found or already completed" });
+    }
+
+    const session = rows[0];
+
+    // Calculate energy consumed (example calculation)
+    const durationInHours =
+      (Date.now() - new Date(session.start_time).getTime()) / (1000 * 60 * 60);
+    const energyConsumed = durationInHours * session.connector.power; // kWh
+    const totalCost = energyConsumed * 100; // Assuming 100〒 per kWh
+
+    // Update with calculated values
+    await pool.query(
+      "UPDATE charging_sessions SET energy_consumed = $1, total_cost = $2 WHERE id = $3",
+      [energyConsumed, totalCost, session.id],
+    );
+
+    // Create history record
+    await pool.query(
+      "INSERT INTO charging_history (session_id, connector_id, user_id, transaction_id, start_time, end_time, energy_consumed, total_cost, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+      [
+        session.id,
+        session.connector_id,
+        session.user_id,
+        session.transaction_id,
+        session.start_time,
+        session.end_time,
+        energyConsumed,
+        totalCost,
+        session.status,
+        session.created_at,
+      ],
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error stopping charging session:", error);
+    res.status(500).json({ error: "Failed to stop charging session" });
+  }
+});
+
+app.get("/api/active-session/:connectorId", async (req, res) => {
+  try {
+    const { connectorId } = req.params;
+
+    const { rows } = await pool.query(
+      "SELECT cs.*, c.power, c.station_id FROM charging_sessions cs JOIN connectors c ON cs.connector_id = c.id WHERE cs.connector_id = $1 AND cs.status = 'active'",
+      [connectorId],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+
+    // Add vehicle capacity (you would get this from vehicle details)
+    // This is a placeholder value
+    rows[0].vehicle_capacity = 60; // kWh
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error("Error fetching active session:", error);
+    res.status(500).json({ error: "Failed to fetch active session" });
   }
 });
 

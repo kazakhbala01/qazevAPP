@@ -33,6 +33,14 @@ import onboarding1 from "@/assets/images/onboarding1.png";
 import onboarding2 from "@/assets/images/onboarding2.png";
 import onboarding3 from "@/assets/images/onboarding3.png";
 import signUpCar from "@/assets/images/signup-car.png";
+import tenge from "@/assets/icons/tenge.png";
+import lighting from "@/assets/icons/ligthing.png";
+import time from "@/assets/icons/time.png";
+import battery from "@/assets/icons/battery.png";
+import ccs from "@/assets/icons/ccs.png";
+import ccstp2 from "@/assets/icons/ccstp2.png";
+import chademo from "@/assets/icons/chademo.png";
+import gbt from "@/assets/icons/gbt.png";
 
 export const images = {
   onboarding1,
@@ -73,6 +81,14 @@ export const icons = {
   to,
   charge,
   charge_green,
+  tenge,
+  time,
+  lighting,
+  battery,
+  ccs,
+  ccstp2,
+  gbt,
+  chademo,
 };
 
 export const onboarding = [

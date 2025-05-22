@@ -8,6 +8,7 @@ import {
   TouchableWithoutFeedback,
   Dimensions,
   Alert,
+  Image,
 } from "react-native";
 import MapView, { Marker, Callout } from "react-native-maps";
 import {
@@ -21,6 +22,15 @@ import { styles } from "@/assets/styles/styles";
 import { useUser } from "@/contexts/UserContext";
 
 const { height: screenHeight } = Dimensions.get("window");
+
+// Define connector icons
+type ConnectorType = "CCS" | "Type 2" | "CHAdeMO" | "GBT";
+const connectorIcons: Record<ConnectorType, string> = {
+  CCS: require("@/assets/icons/ccs.png"),
+  "Type 2": require("@/assets/icons/ccstp2.png"),
+  CHAdeMO: require("@/assets/icons/chademo.png"),
+  GBT: require("@/assets/icons/gbt.png"),
+};
 
 const Home = () => {
   const { locations, location, error, refetch } = useStationsData();
@@ -38,6 +48,7 @@ const Home = () => {
     null,
   );
   const { user } = useUser();
+
   // Auto-refresh data every 30 seconds
   useEffect(() => {
     const intervalId = setInterval(refetch, 30000);
@@ -89,6 +100,7 @@ const Home = () => {
       },
     });
   };
+
   // Navigate to reservation screen
   const handleReservePress = () => {
     setModalVisible(false);
@@ -111,14 +123,38 @@ const Home = () => {
           key={station.id}
           onPress={() => setSelectedStationId(station.id)}
         >
-          <View
-            style={[
-              styles.stationCard,
-              selectedStationId === station.id ? styles.selectedStation : {},
-            ]}
-          >
-            <Text>Station: {station.station_number}</Text>
-            <Text>Status: {station.status}</Text>
+          <View style={styles.stationCard}>
+            {/* Station Details Container */}
+            <View style={styles.stationDetailsContainer}>
+              <Text>{station.station_number}</Text>
+              <Text>
+                Status:{" "}
+                <Text
+                  style={{
+                    color:
+                      station.status === "available"
+                        ? "#2ecc71" // Light green for available
+                        : "#e74c3c", // Red for other statuses
+                  }}
+                >
+                  {station.status}
+                </Text>
+              </Text>
+            </View>
+
+            {/* Connector Icons Container */}
+            <View style={styles.connectorIconsContainer}>
+              {station.connectors.map((connector) => (
+                <Image
+                  key={connector.id}
+                  source={
+                    connectorIcons[connector.connector_type] ||
+                    require("@/assets/icons/ccs.png")
+                  }
+                  style={styles.connectorIcon}
+                />
+              ))}
+            </View>
           </View>
         </TouchableOpacity>
       ))}
@@ -148,9 +184,27 @@ const Home = () => {
                     : {},
                 ]}
               >
+                <Image
+                  source={
+                    connectorIcons[connector.connector_type as ConnectorType]
+                  }
+                  style={styles.connectorIcon}
+                />
                 <Text>Type: {connector.connector_type}</Text>
                 <Text>Power: {connector.power} kW</Text>
-                <Text>Status: {connector.status}</Text>
+                <Text>
+                  Status:{" "}
+                  <Text
+                    style={{
+                      color:
+                        connector.status === "available"
+                          ? "#00b447" // Light green for available
+                          : "#e74c3c", // Red for other statuses
+                    }}
+                  >
+                    {connector.status}
+                  </Text>
+                </Text>
               </View>
             </TouchableOpacity>
           ))}
@@ -276,7 +330,10 @@ const Home = () => {
                     <Text style={styles.cardTitle}>
                       {selectedLocation.name}
                     </Text>
-                    <Text>Details: {selectedLocation.details}</Text>
+                    <Text style={styles.cardDetails}>
+                      {" "}
+                      Details: {selectedLocation.details}
+                    </Text>
 
                     {!selectedStationId
                       ? renderStationCards()
