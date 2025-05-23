@@ -2,14 +2,12 @@ import React from "react";
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useUser } from "@/contexts/UserContext";
-const photo = "@/assets/icons/charge_green.png";
 const Profile = () => {
   const { user } = useUser();
 
@@ -26,26 +24,23 @@ const Profile = () => {
         </View>
 
         <View style={styles.accountBalanceContainer}>
-          <Text style={styles.accountText}>Мой счет</Text>
+          <Text style={styles.accountText}>Balance</Text>
           <Text style={styles.balanceText}>0₸</Text>
         </View>
         <View style={styles.infoContainer}>
-          <Text style={styles.infoLabel}>Полученные сссылки</Text>
+          <Text style={styles.infoLabel}>Information</Text>
           <TouchableOpacity style={styles.infoButton}>
-            <Text style={styles.infoButtonText}>История зарядок</Text>
+            <Text style={styles.infoButtonText}>Charge History</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.infoButton}>
-            <Text style={styles.infoButtonText}>Активировать промокод</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.infoButton}>
-            <Text style={styles.infoButtonText}>Помощь</Text>
+            <Text style={styles.infoButtonText}>Get Help</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.settingsContainer}>
-          <Text style={styles.settingsLabel}>Настройки</Text>
+          <Text style={styles.settingsLabel}>Settings</Text>
           <TouchableOpacity style={styles.settingsButton}>
-            <Text style={styles.settingsButtonText}>Профиль</Text>
+            <Text style={styles.settingsButtonText}>Profile</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

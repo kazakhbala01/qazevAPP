@@ -17,6 +17,10 @@
         "backgroundColor": "#ffffff"
       }
     },
+    "androidNavigationBar": {
+      "visible": true,
+      "backgroundColor": "#ffffff"
+    },
     "web": {
       "bundler": "metro",
       "output": "static",

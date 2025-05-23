@@ -1,6 +1,6 @@
 // SignIn.tsx
-import { Image, ScrollView, Text, View, Alert } from "react-native";
-import { icons, images } from "@/constants";
+import { ScrollView, Text, View, Alert } from "react-native";
+import { icons } from "@/constants";
 import InputField from "@/components/InputField";
 import { useState } from "react";
 import CustomButton from "@/components/CustomButton";
@@ -73,15 +73,14 @@ const SignIn = () => {
   return (
     <ScrollView className="flex-1 bg-white">
       <View className="flex-1 bg-white">
-        <View className="relative w-full h-[250px]">
-          <Image source={images.signUpCar} className="z-0 w-full h-[250px]" />
-          <Text className="text-black text-2xl font-JakartaSemiBold absolute bottom-5 left-5">
-            Welcome👋
+        <View className="relative w-full h-[190px]">
+          <Text className="text-black text-4xl font-JakartaExtraBold absolute bottom-5 left-5">
+            Hi, Welcome👋
           </Text>
         </View>
         <View className="p-5">
           <InputField
-            label="Email"
+            label="  Email"
             placeholder="Enter your email"
             icon={icons.email}
             value={form.email}
@@ -91,7 +90,7 @@ const SignIn = () => {
           <Text className="text-red-500 text-xs mt-1">{errors.email}</Text>
 
           <InputField
-            label="Password"
+            label="  Password"
             placeholder="Enter your Password"
             icon={icons.lock}
             secureTextEntry={true}

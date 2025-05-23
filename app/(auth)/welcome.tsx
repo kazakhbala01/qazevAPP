@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { onboarding } from "@/constants";
 import { Image } from "react-native";
 import CustomButton from "@/components/CustomButton";
+import { StatusBar } from "expo-status-bar";
 import "@/global.css";
 const Onboarding = () => {
   const swiperRef = useRef<Swiper>(null);
@@ -13,7 +14,17 @@ const Onboarding = () => {
   const isLastSlide = activeIndex === onboarding.length - 1;
 
   return (
-    <SafeAreaView className="flex h-full items-center justify-between bg-white">
+    <SafeAreaView
+      className="flex h-full items-center justify-between bg-white"
+      style={{
+        paddingBottom: 0, // Remove default padding
+      }}
+    >
+      <StatusBar
+        style="dark"
+        translucent={true}
+        backgroundColor="transparent"
+      />
       <TouchableOpacity
         onPress={() => {
           router.push(`/(root)/(tabs)/home`);
@@ -32,6 +43,7 @@ const Onboarding = () => {
           <View className="w-[32px] h-[4px] mx-1 bg-[#0286FF] rounded-full" />
         }
         onIndexChanged={(index) => setActiveIndex(index)}
+        className="mb-10"
       >
         {onboarding.map((item) => (
           <View key={item.id} className="flex items-center justify-between p-5">
@@ -58,7 +70,7 @@ const Onboarding = () => {
             ? router.replace("/(auth)/sign-up")
             : swiperRef.current?.scrollBy(1)
         }
-        className="w-11/12 mt-10"
+        className="w-11/12"
       />
     </SafeAreaView>
   );

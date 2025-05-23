@@ -74,15 +74,14 @@ const SignUp = () => {
   return (
     <ScrollView className="flex-1 bg-white">
       <View className="flex-1 bg-white">
-        <View className="relative w-full h-[250px]">
-          <Image source={images.signUpCar} className="z-0 w-full h-[250px]" />
-          <Text className="text-2xl text-black font-JakartaSemiBold absolute bottom-5 left-5">
-            Create Your Account
+        <View className="relative w-full h-[190px]">
+          <Text className="text-4xl text-black font-JakartaExtraBold absolute bottom-5 left-5">
+            Create account
           </Text>
         </View>
         <View className="p-5">
           <InputField
-            label="Name"
+            label="  Username"
             placeholder="Enter name"
             icon={icons.person}
             value={form.name}
@@ -92,7 +91,7 @@ const SignUp = () => {
           <Text className="text-red-500 text-xs mt-1">{errors.name}</Text>
 
           <InputField
-            label="Email"
+            label="  Email"
             placeholder="Enter email"
             icon={icons.email}
             textContentType="emailAddress"
@@ -103,7 +102,7 @@ const SignUp = () => {
           <Text className="text-red-500 text-xs mt-1">{errors.email}</Text>
 
           <InputField
-            label="Password"
+            label="  Password"
             placeholder="Enter password"
             icon={icons.lock}
             secureTextEntry={true}

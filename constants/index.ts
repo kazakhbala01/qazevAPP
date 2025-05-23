@@ -94,23 +94,23 @@ export const icons = {
 export const onboarding = [
   {
     id: 1,
-    title: "The perfect ride is just a tap away!",
+    title: "The perfect charge is just ready!",
     description:
-      "Your journey begins with Ryde. Find your ideal ride effortlessly.",
+      "Your EV charging begins with QazEV. Find your ideal station effortlessly.",
     image: images.onboarding1,
   },
   {
     id: 2,
-    title: "Best car in your hands with Ryde",
+    title: "Best experience with QazEV",
     description:
-      "Discover the convenience of finding your perfect ride with Ryde",
+      "Discover the convenience of finding your charging station with QazEV",
     image: images.onboarding2,
   },
   {
     id: 3,
-    title: "Your ride, your way. Let's go!",
+    title: "Your reservation, your charger, let's Go!",
     description:
-      "Enter your destination, sit back, and let us take care of the rest.",
+      "Find your station, reserve, and let us take care of the rest.",
     image: images.onboarding3,
   },
 ];
