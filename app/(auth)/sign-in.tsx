@@ -1,14 +1,18 @@
 // SignIn.tsx
-import { ScrollView, Text, View, Alert } from "react-native";
-import { icons } from "@/constants";
-import InputField from "@/components/InputField";
 import { useState } from "react";
-import CustomButton from "@/components/CustomButton";
+import { View, Text, ScrollView, Alert } from "react-native";
+import { useAuth } from "@/contexts/AuthContext";
+import { useUser } from "@/contexts/UserContext";
 import { Link, router } from "expo-router";
 import { fetchAPI } from "@/lib/fetch";
-import { useUser } from "@/contexts/UserContext";
+import InputField from "@/components/InputField";
+import CustomButton from "@/components/CustomButton";
+import { icons } from "@/constants";
 
 const SignIn = () => {
+  const { storeToken } = useAuth();
+  const { setUser } = useUser();
+
   const [form, setForm] = useState({
     email: "",
     password: "",
@@ -18,8 +22,6 @@ const SignIn = () => {
     email: "",
     password: "",
   });
-
-  const { setUser } = useUser();
 
   // Email validation regex
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -55,8 +57,9 @@ const SignIn = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      if (response.token) {
-        console.log("Login successful. User data:", response.user); // Add this line
+
+      if (response.token && response.user) {
+        await storeToken(response.token);
         setUser(response.user);
         router.push(`/(root)/(tabs)/home`);
       } else {

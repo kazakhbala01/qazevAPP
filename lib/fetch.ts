@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import * as Location from "expo-location";
-
 // Type definitions remain unchanged
 export type Connector = {
   id: number;
@@ -32,7 +31,7 @@ export type LocationCoords = {
 };
 
 // Base URL for the Express.js backend
-const BASE_URL = "http://192.168.1.71:5000/api"; // Replace with your backend URL
+const BASE_URL = "http://192.168.1.71:5000/api";
 
 export const fetchAPI = async (url: string, options: RequestInit = {}) => {
   const fullUrl = `${BASE_URL}${url.startsWith("/") ? url : "/" + url}`;
@@ -268,23 +267,30 @@ export const createReservation = async (reservation: {
   }
 };
 
-export const startChargingSession = async (
-  connectorId: number,
-  userId: number,
-) => {
+export async function startCharging(connectorId, userId) {
   try {
-    const response = await fetch(`${BASE_URL}/start-session`, {
+    const response = await fetch(`${BASE_URL}/start-charge`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ connectorId, userId }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        connectorId,
+        userId,
+      }),
     });
-    if (!response.ok) throw new Error("Failed to start charging session");
-    return await response.json();
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to start charging");
+    }
+
+    return data;
   } catch (error) {
-    console.error("Error starting charging session:", error);
+    console.error("Error starting charging:", error);
     throw error;
   }
-};
+}
 
 // Stop the current charging session
 export const stopChargingSession = async (transactionId: string) => {

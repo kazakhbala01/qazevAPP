@@ -18,6 +18,7 @@ import {
   fetchConnectorDetails,
 } from "@/lib/fetch";
 import { useUser } from "@/contexts/UserContext";
+import { scheduleReservationNotification } from "@/lib/NotificationService";
 
 interface Reservation {
   id: number;

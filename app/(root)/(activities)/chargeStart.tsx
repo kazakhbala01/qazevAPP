@@ -8,7 +8,11 @@ import {
   Image,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
-import { fetchConnectorDetails, fetchReservations } from "@/lib/fetch";
+import {
+  fetchConnectorDetails,
+  fetchReservations,
+  startCharging,
+} from "@/lib/fetch";
 import Slider from "@react-native-community/slider";
 import tenge from "@/assets/icons/tenge.png";
 import lighting from "@/assets/icons/ligthing.png";
@@ -18,21 +22,23 @@ import ccs from "@/assets/icons/ccs.png";
 import ccstp2 from "@/assets/icons/ccstp2.png";
 import chademo from "@/assets/icons/chademo.png";
 import gbt from "@/assets/icons/gbt.png";
+import { useUser } from "@/contexts/UserContext";
 
 type ConnectorType = "CCS" | "Type 2" | "CHAdeMO" | "GBT";
 
 const ChargeStart = () => {
   const { connectorId } = useLocalSearchParams<{ connectorId: string }>();
+  const parsedConnectorId = parseInt(connectorId);
   const [chargingLimit, setChargingLimit] = useState<
     "power" | "time" | "unplanned" | "money" | "soc"
   >("unplanned");
   const [sliderValue, setSliderValue] = useState<number>(50);
   const [availableTime, setAvailableTime] = useState<number>(360); // in minutes
-  const [maxPower, setMaxPower] = useState<number>(22); // in kW
+  const [maxPower, setMaxPower] = useState<number>(100); // in kW
   const [stationDetails, setStationDetails] = useState<any>(null);
   const [isSOCDisabled, setIsSOCDisabled] = useState<boolean>(false);
   let sliderTimeoutId: NodeJS.Timeout;
-
+  const { user } = useUser();
   // Mapping of connector types to icons
   const connectorIcons: Record<ConnectorType, any> = {
     CCS: ccs,
@@ -45,6 +51,7 @@ const ChargeStart = () => {
     const loadStationDetails = async () => {
       if (connectorId) {
         try {
+          console.log("connectorId", connectorId);
           const details = await fetchConnectorDetails(parseInt(connectorId));
           setStationDetails(details);
           setMaxPower(details.power);
@@ -158,9 +165,20 @@ const ChargeStart = () => {
 
   const handleStartCharging = async () => {
     try {
-      // Add your charging start logic here
+      const result = await startCharging(parsedConnectorId, user.id);
+      Alert.alert(
+        "Charging Started",
+        `Transaction ID: ${result.transactionId}`,
+      );
+
+      router.push({
+        pathname: "/(root)/(tabs)/charge",
+        params: {
+          connectorId: parsedConnectorId,
+          transactionId: result.transactionId,
+        },
+      });
     } catch (error) {
-      console.error("Error starting charging:", error);
       Alert.alert("Error", "Failed to start charging");
     }
   };

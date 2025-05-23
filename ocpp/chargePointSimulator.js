@@ -1,9 +1,7 @@
-// chargePointSimulator.js
 import WebSocket from "ws";
 
-const ocppServerUrl = "ws://localhost:5000";
+const ocppServerUrl = "ws://localhost:5000"; // Your server URL
 const chargePointId = "CP001";
-
 const ws = new WebSocket(ocppServerUrl, ["ocpp1.6"]);
 
 function sendCall(action, payload) {
@@ -13,8 +11,14 @@ function sendCall(action, payload) {
   ws.send(callMessage);
 }
 
+let transactionId = null;
+let meterValue = 0;
+let activeConnectorId = null;
+
 ws.on("open", () => {
   console.log("Connected to OCPP server");
+
+  // Boot Notification
   sendCall("BootNotification", {
     chargePointVendor: "Simulator",
     chargePointModel: "TestModel",
@@ -26,32 +30,78 @@ ws.on("message", (data) => {
   console.log("Received OCPP message:", message);
 
   if (message[2] === "RemoteStartTransaction") {
-    console.log("Starting transaction...");
-    setTimeout(() => {
-      sendCall("StartTransaction", {
-        connectorId: 1,
-        idTag: message[3].idTag,
-        meterStart: 0,
-        timestamp: new Date().toISOString(),
-      });
-    }, 1000);
-  } else if (message[2] === "RemoteStopTransaction") {
-    console.log("Stopping transaction...");
-    setTimeout(() => {
-      sendCall("StopTransaction", {
-        transactionId: message[3].transactionId,
-        meterStop: 1000,
-        timestamp: new Date().toISOString(),
-      });
-    }, 1000);
-  } else if (message[2] === "StatusNotification") {
-    console.log("StatusNotification received");
-  } else if (message[2] === "StartTransaction") {
-    console.log("StartTransaction received");
-  } else if (message[2] === "StopTransaction") {
-    console.log("StopTransaction received");
+    const {
+      connectorId,
+      idTag,
+      transactionId: incomingTransactionId,
+    } = message[3];
+
+    // Accept transaction
+    transactionId = incomingTransactionId || `TXN-${Date.now()}`;
+    activeConnectorId = connectorId;
+
+    // Send StartTransaction response
+    ws.send(
+      JSON.stringify([
+        3,
+        message[1],
+        {
+          transactionId,
+          idTagInfo: { status: "Accepted" },
+        },
+      ]),
+    );
+    console.log(
+      `OCPP: RemoteStartTransaction accepted for connector ${connectorId}`,
+    );
+
+    // Start metering simulation
+    startChargingSimulation();
+  }
+
+  if (message[2] === "RemoteStopTransaction") {
+    const { transactionId: incomingTransactionId } = message[3];
+
+    // Send StopTransaction response
+    ws.send(
+      JSON.stringify([
+        3,
+        message[1],
+        {
+          idTagInfo: { status: "Accepted" },
+        },
+      ]),
+    );
+    console.log(
+      `OCPP: RemoteStopTransaction accepted for transaction ${incomingTransactionId}`,
+    );
+
+    // Stop metering simulation
+    if (meterInterval) clearInterval(meterInterval);
+    activeConnectorId = null;
   }
 });
+
+// Simulate charging progress
+let meterInterval = null;
+
+function startChargingSimulation() {
+  meterInterval = setInterval(() => {
+    meterValue += 0.1; // Simulate energy increase
+
+    ws.send(
+      JSON.stringify([
+        2,
+        "meterUpdate",
+        "MeterValues",
+        {
+          connectorId: activeConnectorId,
+          meterValue: meterValue.toFixed(2),
+        },
+      ]),
+    );
+  }, 1000);
+}
 
 ws.on("close", () => {
   console.log("Disconnected from OCPP server");

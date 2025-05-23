@@ -91,12 +91,45 @@ const Home = () => {
       Alert.alert("Error", "Please log in.");
       return;
     }
-    const idTag = user.id.toString(); // Use the logged-in user's ID as the idTag
+
+    // Ensure a location and station are selected
+    if (!selectedLocation || !selectedStationId) {
+      Alert.alert("Error", "Please select a station and connector.");
+      return;
+    }
+
+    // Find the selected station and connector
+    const selectedStation = selectedLocation.stations.find(
+      (station) => station.id === selectedStationId,
+    );
+
+    if (!selectedStation) {
+      Alert.alert("Error", "Selected station not found.");
+      return;
+    }
+
+    const selectedConnector = selectedStation.connectors.find(
+      (connector) => connector.id === selectedConnectorId,
+    );
+
+    if (!selectedConnector) {
+      Alert.alert("Error", "Selected connector not found.");
+      return;
+    }
+
+    // Check if the connector is available
+    if (selectedConnector.status !== "available") {
+      Alert.alert("Unavailable", "Connector is currently in use.");
+      return;
+    }
+
+    // Proceed with navigation if all checks pass
+    const idTag = user.id.toString();
     router.push({
       pathname: "/(root)/(activities)/chargeStart",
       params: {
         connectorId: selectedConnectorId,
-        idTag, // Pass the actual user ID
+        idTag,
       },
     });
   };

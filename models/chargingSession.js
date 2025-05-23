@@ -1,20 +1,26 @@
+// models/chargingSession.js
 const { Pool } = require("pg");
-const { DB_URL } = require("../config/settings");
+const dotenv = require("dotenv");
 
-const pool = new Pool({ connectionString: DB_URL });
+dotenv.config();
 
-const createTable = async () => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS charging_sessions (
-      id SERIAL PRIMARY KEY,
-      charge_point_id TEXT,
-      transaction_id INT,
-      user_id TEXT,
-      start_time TIMESTAMP,
-      stop_time TIMESTAMP,
-      energy_consumed FLOAT
-    );
-  `);
-};
+// Create a PostgreSQL connection pool
+const pool = new Pool({
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: parseInt(process.env.DB_PORT || "5432", 10),
+});
 
-module.exports = { pool, createTable };
+// Example query function for charging sessions
+async function getChargingSession(transactionId) {
+  const result = await pool.query(
+    "SELECT * FROM charging_sessions WHERE transaction_id = $1",
+    [transactionId],
+  );
+  return result.rows[0];
+}
+
+// Export the pool and any helper functions
+module.exports = { pool, getChargingSession };

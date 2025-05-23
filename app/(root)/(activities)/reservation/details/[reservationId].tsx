@@ -9,8 +9,26 @@ import {
   TextInput,
 } from "react-native";
 import { fetchAPI } from "@/lib/fetch";
+import * as Notifications from "expo-notifications";
 
-const ReservationDetail = () => {
+// Set the notification handler
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowAlert: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
+// Request notification permissions
+const requestNotificationPermissions = async () => {
+  const { status } = await Notifications.requestPermissionsAsync();
+  return status === "granted";
+};
+
+export default function ReservationDetail() {
   const { reservationId } = useLocalSearchParams<{ reservationId: string }>();
   const [reservation, setReservation] = useState<any>(null);
   const [newDate, setNewDate] = useState("");
@@ -26,6 +44,9 @@ const ReservationDetail = () => {
           setReservation(response.data);
           setNewDate(response.data.arrival_time);
           setNewDuration(response.data.duration.toString());
+
+          // Schedule notification for upcoming reservation
+          scheduleReservationNotification(response.data);
         } else {
           Alert.alert("Error", "Reservation not found");
           router.back();
@@ -42,6 +63,33 @@ const ReservationDetail = () => {
       loadReservation();
     }
   }, [reservationId]);
+
+  // Function to schedule a reservation notification
+  const scheduleReservationNotification = async (reservation) => {
+    const { arrival_time, connector_id } = reservation;
+    const reservationDate = new Date(arrival_time);
+    const now = new Date();
+
+    const diffTime = Math.floor((reservationDate - now) / (1000 * 60));
+
+    if (diffTime > 0 && diffTime <= 15) {
+      try {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: "Upcoming Reservation",
+            body: `Your reservation for connector ${connector_id} starts in ${diffTime} minutes`,
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: diffTime * 60,
+          },
+        });
+        console.log(`Notification scheduled for connector ${connector_id}`);
+      } catch (error) {
+        console.error("Error scheduling notification:", error);
+      }
+    }
+  };
 
   const handleDeleteReservation = async () => {
     try {
@@ -167,7 +215,7 @@ const ReservationDetail = () => {
       </View>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -259,5 +307,3 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 });
-
-export default ReservationDetail;

@@ -11,6 +11,8 @@ const { Pool } = pg;
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
 dotenv.config();
 
+const clients = new Set();
+
 // PostgreSQL connection pool
 const pool = new Pool({
   user: process.env.DB_USER,
@@ -57,19 +59,12 @@ async function getConnector(connectorId) {
 }
 
 export async function updateConnectorStatus(connectorId, status) {
-  // Convert status to lowercase for consistency
-  status = status.toLowerCase();
-
   const allowedStatuses = ["available", "in use", "out of service"];
-
-  // Validate status
-  if (!allowedStatuses.includes(status)) {
+  if (!allowedStatuses.includes(status.toLowerCase())) {
     throw new Error(
       `Invalid status: ${status}. Allowed values are: ${allowedStatuses.join(", ")}`,
     );
   }
-
-  // Update status in the database
   await pool.query("UPDATE connectors SET status = $1 WHERE id = $2", [
     status,
     connectorId,
@@ -256,7 +251,7 @@ app.post("/api/start-transaction", async (req, res) => {
     // Check if connector is already in use
     const activeSession = await pool.query(
       "SELECT * FROM charging_sessions WHERE connector_id = $1 AND status = $2",
-      [connectorId, "active"],
+      [connectorId, "in use"],
     );
 
     if (activeSession.rows.length > 0) {
@@ -266,7 +261,7 @@ app.post("/api/start-transaction", async (req, res) => {
     // Start new charging session
     await pool.query(
       "INSERT INTO charging_sessions (connector_id, user_id, transaction_id, status) VALUES ($1, $2, $3, $4)",
-      [connectorId, userId, transactionId, "active"],
+      [connectorId, userId, transactionId, "in use"],
     );
 
     res.status(201).json({ success: true });
@@ -287,12 +282,12 @@ app.post("/api/stop-transaction", async (req, res) => {
     // Stop the charging session
     await pool.query(
       "UPDATE charging_sessions SET end_time = NOW(), status = $1 WHERE transaction_id = $2 AND status = $3",
-      ["stopped", transactionId, "active"],
+      ["out of service", transactionId, "in use"], // Use the correct status values
     );
 
     res.json({ success: true });
-  } catch (err) {
-    console.error("Error stopping charging session:", err);
+  } catch (error) {
+    console.error("Error stopping charging session:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -304,7 +299,7 @@ app.get("/api/active-charge/:userId", async (req, res) => {
     // Fetch active charging session for the user
     const activeSession = await pool.query(
       "SELECT * FROM charging_sessions WHERE user_id = $1 AND status = $2",
-      [userId, "active"],
+      [userId, "in use"],
     );
 
     if (activeSession.rows.length > 0) {
@@ -317,45 +312,52 @@ app.get("/api/active-charge/:userId", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
 // Start charging via OCPP
 app.post("/api/start-charge", async (req, res) => {
-  const { connectorId, idTag, userId } = req.body;
+  const { connectorId, userId } = req.body;
 
-  if (!connectorId || !idTag || !userId) {
+  if (!connectorId || !userId) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
-    // Check if connector exists and is available
+    // Check if connector is available
     const connector = await getConnector(connectorId);
-    if (!connector) {
-      return res.status(404).json({ error: "Connector not found" });
+    if (!connector || connector.status !== "available") {
+      return res.status(409).json({ error: "Connector not available" });
     }
 
-    // Check if connector is already in use
-    const activeSession = await pool.query(
-      "SELECT * FROM charging_sessions WHERE connector_id = $1 AND status = $2",
-      [connectorId, "active"],
-    );
+    // Create transaction
+    const transactionId = `TXN-${Date.now()}-${Math.floor(
+      Math.random() * 1000,
+    )}`;
 
-    if (activeSession.rows.length > 0) {
-      return res.status(409).json({ error: "Connector is already in use" });
-    }
+    // Update connector status to "in use"
+    await updateConnectorStatus(connectorId, "in use");
 
-    // Generate a unique transaction ID
-    const transactionId = Math.floor(
-      100000 + Math.random() * 900000,
-    ).toString();
-
-    // Start new charging session
+    // Create charging session
     await pool.query(
       "INSERT INTO charging_sessions (connector_id, user_id, transaction_id, status) VALUES ($1, $2, $3, $4)",
-      [connectorId, userId, transactionId, "active"],
+      [connectorId, userId, transactionId, "in use"],
     );
 
-    res.json({ success: true, transactionId });
+    // Notify charging point via OCPP
+    if (wss) {
+      broadcastRemoteStartTransaction(
+        wss,
+        connectorId,
+        "USER123",
+        transactionId,
+      );
+      console.log(
+        `OCPP: RemoteStartTransaction sent for connector ${connectorId}`,
+      );
+    }
+
+    res.json({ transactionId });
   } catch (error) {
-    console.error("Error starting charging session:", error);
+    console.error("Error starting charge:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -363,31 +365,40 @@ app.post("/api/start-charge", async (req, res) => {
 app.post("/api/stop-charge", async (req, res) => {
   const { connectorId, transactionId } = req.body;
 
-  // Input validation
   if (!connectorId || !transactionId) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
-    // Check if connector exists and update its status to "Available"
+    // Check if connector exists
     const connector = await getConnector(connectorId);
     if (!connector) {
       return res.status(404).json({ error: "Connector not found" });
     }
 
-    // Ensure consistent case sensitivity
+    // Update connector status to "available"
     await updateConnectorStatus(connectorId, "available");
 
-    // Broadcast RemoteStopTransaction to charge points
-    broadcastRemoteStopTransaction(wss, transactionId);
+    // Stop charging session
+    await pool.query(
+      "UPDATE charging_sessions SET end_time = NOW(), status = $1 WHERE transaction_id = $2 AND status = $3",
+      ["out of service", transactionId, "in use"],
+    );
+
+    // Notify charging point via OCPP
+    if (wss) {
+      broadcastRemoteStopTransaction(wss, transactionId);
+      console.log(
+        `OCPP: RemoteStopTransaction sent for transaction ${transactionId}`,
+      );
+    }
 
     res.json({ success: true });
   } catch (error) {
     console.error("Error stopping charge:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Server error" });
   }
 });
-
 // Broadcast RemoteStopTransaction to all connected charge points
 function broadcastRemoteStopTransaction(wss, transactionId) {
   if (!wss) {
@@ -407,15 +418,12 @@ function broadcastRemoteStopTransaction(wss, transactionId) {
     }
   });
 }
-
-// Setup OCPP WebSocket server
 let wss;
+// Setup OCPP WebSocket server
 function setupOcppServer(server) {
   const wsServer = new WebSocketServer({ server });
 
   wsServer.on("connection", (ws) => {
-    console.log("Charge point connected");
-
     ws.on("message", async (data) => {
       const message = JSON.parse(data);
       console.log("Received OCPP message:", message);
@@ -437,7 +445,18 @@ function setupOcppServer(server) {
         // Update connector status in the database
         const { connectorId, status } = message[3];
         await updateConnectorStatus(connectorId, status);
-        console.log(`Updated connector ${connectorId} status to ${status}`);
+        console.log(
+          `Backend received status update: ${status} for connector ${connectorId}`,
+        );
+      } else if (message[2] === "MeterValues") {
+        // Handle MeterValues message
+        const { connectorId, meterValue } = message[3];
+        console.log(
+          `Backend received meter update: ${meterValue} kWh for connector ${connectorId}`,
+        );
+
+        // Broadcast to clients
+        broadcastMeterUpdate(connectorId, meterValue);
       }
     });
 
@@ -448,21 +467,55 @@ function setupOcppServer(server) {
 
   return wsServer;
 }
-// Broadcast RemoteStartTransaction to all connected charge points
-function broadcastRemoteStartTransaction(wss, connectorId, idTag) {
+
+function broadcastMeterUpdate(connectorId, meterValue) {
   if (!wss) {
     console.error("WebSocket server not initialized");
     return;
   }
 
+  // Get the active transaction ID for the connector
+  getActiveTransactionId(connectorId).then((transactionId) => {
+    if (!transactionId) {
+      console.error("No active transaction for connector", connectorId);
+      return;
+    }
+
+    const update = {
+      type: "meter_update",
+      transactionId,
+      connectorId,
+      meterValue,
+    };
+
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(update));
+      }
+    });
+  });
+}
+
+// Broadcast RemoteStartTransaction to all connected charge points
+function broadcastRemoteStartTransaction(
+  wss,
+  connectorId,
+  idTag,
+  transactionId,
+) {
+  if (!wss) return;
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(
         JSON.stringify([
-          2,
-          "msg123",
+          2, // OCPP message type: CALL
+          "msg123", // Unique message ID
           "RemoteStartTransaction",
-          { connectorId, idTag },
+          {
+            connectorId,
+            idTag,
+            transactionId,
+          },
         ]),
       );
     }
@@ -729,7 +782,7 @@ app.post("/api/start-session", async (req, res) => {
 
     // Create the session
     const { rows } = await pool.query(
-      "INSERT INTO charging_sessions (connector_id, user_id, transaction_id, status) VALUES ($1, $2, $3, 'active') RETURNING *",
+      "INSERT INTO charging_sessions (connector_id, user_id, transaction_id, status) VALUES ($1, $2, $3, 'in use') RETURNING *",
       [connectorId, userId, transactionId],
     );
 
@@ -751,7 +804,7 @@ app.post("/api/stop-session", async (req, res) => {
 
     // Update the active session
     const { rows } = await pool.query(
-      "UPDATE charging_sessions SET end_time = NOW(), status = 'completed' WHERE transaction_id = $1 AND status = 'active' RETURNING *",
+      "UPDATE charging_sessions SET end_time = NOW(), status = 'completed' WHERE transaction_id = $1 AND status = 'in use' RETURNING *",
       [transactionId],
     );
 
@@ -800,20 +853,24 @@ app.post("/api/stop-session", async (req, res) => {
 });
 
 app.get("/api/active-session/:connectorId", async (req, res) => {
-  try {
-    const { connectorId } = req.params;
+  const { connectorId } = req.params;
 
+  // Validate connectorId
+  const parsedConnectorId = parseInt(connectorId);
+  if (isNaN(parsedConnectorId)) {
+    return res.status(400).json({ error: "Invalid connectorId" });
+  }
+
+  try {
     const { rows } = await pool.query(
-      "SELECT cs.*, c.power, c.station_id FROM charging_sessions cs JOIN connectors c ON cs.connector_id = c.id WHERE cs.connector_id = $1 AND cs.status = 'active'",
-      [connectorId],
+      "SELECT cs.*, c.power, c.station_id FROM charging_sessions cs JOIN connectors c ON cs.connector_id = c.id WHERE cs.connector_id = $1 AND cs.status = 'in use'",
+      [parsedConnectorId],
     );
 
     if (rows.length === 0) {
       return res.status(404).json({ error: "No active session found" });
     }
 
-    // Add vehicle capacity (you would get this from vehicle details)
-    // This is a placeholder value
     rows[0].vehicle_capacity = 60; // kWh
 
     res.json(rows[0]);
@@ -823,6 +880,18 @@ app.get("/api/active-session/:connectorId", async (req, res) => {
   }
 });
 
+async function getActiveTransactionId(connectorId) {
+  try {
+    const { rows } = await pool.query(
+      "SELECT transaction_id FROM charging_sessions WHERE connector_id = $1 AND status = $2",
+      [connectorId, "in use"],
+    );
+    return rows.length > 0 ? rows[0].transaction_id : null;
+  } catch (error) {
+    console.error("Error fetching active transaction ID:", error);
+    return null;
+  }
+}
 // Start server
 const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

@@ -1,14 +1,18 @@
 // SignUp.tsx
 import { useState } from "react";
-import { Alert, Image, ScrollView, Text, View } from "react-native";
-import { ReactNativeModal } from "react-native-modal";
+import { View, Text, ScrollView, Alert, Image } from "react-native";
+import { useAuth } from "@/contexts/AuthContext";
+import { useUser } from "@/contexts/UserContext";
 import { Link, router } from "expo-router";
-import CustomButton from "@/components/CustomButton";
-import InputField from "@/components/InputField";
-import { icons, images } from "@/constants";
 import { fetchAPI } from "@/lib/fetch";
+import InputField from "@/components/InputField";
+import CustomButton from "@/components/CustomButton";
+import { icons, images } from "@/constants";
+import { ReactNativeModal } from "react-native-modal";
 
 const SignUp = () => {
+  const { storeToken } = useAuth();
+  const { setUser } = useUser();
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [form, setForm] = useState({
     name: "",
@@ -60,7 +64,9 @@ const SignUp = () => {
         body: JSON.stringify(form),
       });
 
-      if (response.token) {
+      if (response.token && response.user) {
+        await storeToken(response.token);
+        setUser(response.user);
         setShowSuccessModal(true);
       } else {
         Alert.alert("Signup Error", response.error || "Signup failed");
@@ -75,7 +81,7 @@ const SignUp = () => {
     <ScrollView className="flex-1 bg-white">
       <View className="flex-1 bg-white">
         <View className="relative w-full h-[190px]">
-          <Text className="text-4xl text-black font-JakartaExtraBold absolute bottom-5 left-5">
+          <Text className="text-black text-4xl font-JakartaExtraBold absolute bottom-5 left-5">
             Create account
           </Text>
         </View>

@@ -5,10 +5,9 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { UserProvider } from "@/contexts/UserContext"; // Import UserProvider
 import "react-native-reanimated";
-
+import { AuthProvider } from "@/contexts/AuthContext";
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
-
 export default function RootLayout() {
   const [loaded] = useFonts({
     "Jakarta-Bold": require("../assets/fonts/PlusJakartaSans-Bold.ttf"),
@@ -32,12 +31,14 @@ export default function RootLayout() {
 
   return (
     <UserProvider>
-      <Stack>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="(root)" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
+      <AuthProvider>
+        <Stack>
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="(root)" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+      </AuthProvider>
     </UserProvider>
   );
 }
