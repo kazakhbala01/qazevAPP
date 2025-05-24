@@ -322,6 +322,18 @@ app.post("/api/start-charge", async (req, res) => {
   }
 
   try {
+    // Check if the user has an active charging session
+    const activeSession = await pool.query(
+      "SELECT * FROM charging_sessions WHERE user_id = $1 AND status IN ('in use', 'reserved') AND end_time IS NULL",
+      [userId],
+    );
+
+    if (activeSession.rows.length > 0) {
+      return res
+        .status(409)
+        .json({ error: "User already has an active charging session" });
+    }
+
     // Check if connector is available
     const connector = await getConnector(connectorId);
     if (!connector || connector.status !== "available") {

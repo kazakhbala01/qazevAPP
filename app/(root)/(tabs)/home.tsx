@@ -48,10 +48,10 @@ const Home = () => {
     null,
   );
   const { user } = useUser();
-
-  // Auto-refresh data every 30 seconds
+  useState<boolean>(false);
+  // Auto-refresh data every 10 seconds
   useEffect(() => {
-    const intervalId = setInterval(refetch, 30000);
+    const intervalId = setInterval(refetch, 10000);
     return () => clearInterval(intervalId);
   }, [refetch]);
 

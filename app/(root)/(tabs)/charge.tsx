@@ -1,4 +1,3 @@
-// Charge.tsx
 import React, { useState, useEffect, useRef } from "react";
 import {
   View,
@@ -13,32 +12,35 @@ import {
 import { useLocalSearchParams, router } from "expo-router";
 import { fetchAPI } from "@/lib/fetch";
 import { useUser } from "@/contexts/UserContext";
+
 const Charge = () => {
   const { connectorId, transactionId } = useLocalSearchParams<{
     connectorId: string;
     transactionId: string;
   }>();
-  const parsedConnectorId = parseInt(connectorId);
+  const parsedConnectorId = connectorId ? parseInt(connectorId) : NaN;
   const [currentPage, setCurrentPage] = useState(0);
   const [soc, setSoc] = useState<number>(0);
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [energyConsumed, setEnergyConsumed] = useState<number>(0);
   const [cost, setCost] = useState<number>(0);
-  const [hasActiveSession, setHasActiveSession] = useState(true);
+  const [hasActiveSession, setHasActiveSession] = useState(false);
   const [reservations, setReservations] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [loadingReservations, setLoadingReservations] = useState(true);
+  const [refreshingSession, setRefreshingSession] = useState(false);
+  const [refreshingReservations, setRefreshingReservations] = useState(false);
   const { user } = useUser();
   const scrollViewRef = useRef<ScrollView>(null);
   const screenWidth = Dimensions.get("window").width;
-  const [refreshing, setRefreshing] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   // Fetch real-time updates via WebSocket
   useEffect(() => {
-    if (!transactionId) return;
+    if (!transactionId || isNaN(parsedConnectorId) || parsedConnectorId <= 0)
+      return;
 
-    // Connect to WebSocket
     const ws = new WebSocket("ws://192.168.1.71:5000/");
     wsRef.current = ws;
 
@@ -48,7 +50,7 @@ const Charge = () => {
 
     ws.onerror = (error) => {
       console.error("WebSocket Error:", error);
-      // Handle error (e.g., show error message to user)
+      Alert.alert("Error", "Failed to connect to real-time updates");
     };
 
     ws.onmessage = (event) => {
@@ -61,7 +63,7 @@ const Charge = () => {
         const newMeterValue = parseFloat(update.meterValue);
         setEnergyConsumed(newMeterValue);
         setSoc(Math.min(100, Math.floor((newMeterValue / 100) * 100))); // Convert kWh to SOC
-        setCost(newMeterValue * 100); // Assuming 100〒/kWh// Log received meter value
+        setCost(newMeterValue * 100); // Assuming 100〒/kWh
       }
     };
 
@@ -70,62 +72,106 @@ const Charge = () => {
         wsRef.current.close();
       }
     };
-  }, [transactionId]);
+  }, [transactionId, parsedConnectorId]);
 
-  const loadChargingData = async () => {
+  const loadActiveSession = async () => {
     if (!user) {
+      Alert.alert("Error", "User not logged in");
       router.back();
       return;
     }
+
     try {
-      setLoading(true);
-      // Fetch initial session data from the API
-      const session = await fetchAPI(`/active-session/${parsedConnectorId}`);
-      if (session) {
-        setSoc(session.soc || 0);
-        setEnergyConsumed(session.energy_consumed || 0);
-        setCost(session.total_cost || 0);
-        setHasActiveSession(true);
+      setRefreshingSession(true);
+      if (!isNaN(parsedConnectorId) && parsedConnectorId > 0) {
+        const session = await fetchAPI(`/active-session/${parsedConnectorId}`, {
+          timeout: 10000,
+        });
+        if (session) {
+          setSoc(session.soc || 0);
+          setEnergyConsumed(session.energy_consumed || 0);
+          setCost(session.total_cost || 0);
+          setHasActiveSession(true);
+        } else {
+          setHasActiveSession(false);
+        }
       } else {
         setHasActiveSession(false);
       }
-
-      // Fetch user reservations
-      const userReservations = await fetchAPI(
-        `/user-reservations?userId=${user.id}`,
-      );
-      setReservations(userReservations);
     } catch (error) {
-      console.error("Error loading data:", error);
+      console.error("Error loading session:", error);
       setHasActiveSession(false);
     } finally {
-      setLoading(false);
+      setLoadingSession(false);
+      setRefreshingSession(false);
     }
   };
 
-  useEffect(() => {
-    loadChargingData();
-  }, [parsedConnectorId, user]);
+  const loadReservations = async () => {
+    if (!user) {
+      Alert.alert("Error", "User not logged in");
+      router.back();
+      return;
+    }
 
-  // Update calculations from WebSocket (no need for interval)
-  const formatTime = (minutes) => {
-    return `${minutes} mins`;
+    try {
+      setRefreshingReservations(true);
+      const userReservations = await fetchAPI(
+        `/user-reservations?userId=${user.id}`,
+        { timeout: 10000 },
+      );
+      setReservations(userReservations || []);
+    } catch (error) {
+      console.error("Error loading reservations:", error);
+      Alert.alert("Error", `Failed to load reservations: ${error.message}`);
+    } finally {
+      setLoadingReservations(false);
+      setRefreshingReservations(false);
+    }
   };
 
-  const handleTabChange = (index) => {
+  // Load data on mount and when dependencies change
+  useEffect(() => {
+    if (currentPage === 0) {
+      loadActiveSession();
+    } else {
+      loadReservations();
+    }
+  }, [parsedConnectorId, user, currentPage]);
+
+  const formatTime = (minutes: number) => {
+    return `${Math.floor(minutes)} mins`;
+  };
+
+  const handleTabChange = (index: number) => {
     setCurrentPage(index);
     if (scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ x: index * screenWidth });
+      scrollViewRef.current.scrollTo({
+        x: index * screenWidth,
+        animated: true,
+      });
+    }
+    // Load data for the newly selected tab
+    if (index === 0) {
+      loadActiveSession();
+    } else {
+      loadReservations();
     }
   };
 
   const renderActiveCharging = () => {
-    if (loading && !refreshing) return <Text>Loading...</Text>;
+    if (loadingSession && !refreshingSession) {
+      return <Text style={styles.loadingText}>Loading...</Text>;
+    }
     if (!hasActiveSession) {
       return (
         <View style={styles.page}>
           <Text style={styles.title}>Charging</Text>
-          <Text style={styles.noActiveSession}>No active charging session</Text>
+          <Text style={styles.noActiveSession}>
+            {isNaN(parsedConnectorId) || parsedConnectorId <= 0
+              ? "Invalid or missing connector ID"
+              : "No active charging session"}
+          </Text>
         </View>
       );
     }
@@ -135,8 +181,10 @@ const Charge = () => {
         style={styles.page}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={loadChargingData}
+            refreshing={refreshingSession}
+            onRefresh={loadActiveSession}
+            colors={["#2563eb"]}
+            tintColor="#2563eb"
           />
         }
       >
@@ -177,7 +225,12 @@ const Charge = () => {
       </ScrollView>
     );
   };
+
   const renderReservations = () => {
+    if (loadingReservations && !refreshingReservations) {
+      return <Text style={styles.loadingText}>Loading...</Text>;
+    }
+
     const sortedReservations = [...reservations].sort((a, b) => {
       const dateA = new Date(a.arrival_time).getTime();
       const dateB = new Date(b.arrival_time).getTime();
@@ -189,8 +242,10 @@ const Charge = () => {
         style={styles.page}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={loadChargingData}
+            refreshing={refreshingReservations}
+            onRefresh={loadReservations}
+            colors={["#2563eb"]}
+            tintColor="#2563eb"
           />
         }
       >
@@ -233,13 +288,12 @@ const Charge = () => {
   };
 
   const handleStopCharging = async () => {
-    try {
-      if (!transactionId) {
-        Alert.alert("Error", "No active transaction");
-        return;
-      }
+    if (!transactionId || isNaN(parsedConnectorId) || parsedConnectorId <= 0) {
+      Alert.alert("Error", "Invalid or missing transaction or connector ID");
+      return;
+    }
 
-      // Call the backend to stop the charging session
+    try {
       await fetchAPI(`/stop-charge`, {
         method: "POST",
         headers: {
@@ -251,11 +305,8 @@ const Charge = () => {
         }),
       });
 
-      // Update the UI to reflect that the session has ended
       setHasActiveSession(false);
       Alert.alert("Charging Stopped", "Charging session has been stopped.");
-
-      // Navigate back or to another screen
       router.back();
     } catch (error) {
       console.error("Error stopping charging:", error);
@@ -263,10 +314,17 @@ const Charge = () => {
     }
   };
 
-  const handleScroll = (event) => {
+  const handleScroll = (event: any) => {
     const x = event.nativeEvent.contentOffset.x;
     const newPage = Math.round(x / screenWidth);
-    if (newPage !== currentPage) setCurrentPage(newPage);
+    if (newPage !== currentPage) {
+      setCurrentPage(newPage);
+      if (newPage === 0) {
+        loadActiveSession();
+      } else {
+        loadReservations();
+      }
+    }
   };
 
   return (
@@ -343,6 +401,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "bold",
     marginBottom: 30,
+  },
+  loadingText: {
+    fontSize: 18,
+    color: "#757575",
+    textAlign: "center",
+    marginTop: 20,
   },
   noActiveSession: {
     fontSize: 18,

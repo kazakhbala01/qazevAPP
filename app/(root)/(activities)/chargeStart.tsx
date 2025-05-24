@@ -37,6 +37,10 @@ const ChargeStart = () => {
   const [maxPower, setMaxPower] = useState<number>(100); // in kW
   const [stationDetails, setStationDetails] = useState<any>(null);
   const [isSOCDisabled, setIsSOCDisabled] = useState<boolean>(false);
+  const [nextReservation, setNextReservation] = useState<{
+    date: Date;
+    timeString: string;
+  } | null>(null);
   let sliderTimeoutId: NodeJS.Timeout;
   const { user } = useUser();
   // Mapping of connector types to icons
@@ -121,11 +125,34 @@ const ChargeStart = () => {
         }
 
         if (nearestReservation) {
-          const resDate = new Date(
+          const nearestReservationDate = new Date(
             `${nearestReservation.reservation_date}T${nearestReservation.arrival_time}`,
           );
+          const diffInHours =
+            (nearestReservationDate.getTime() - currentDateTime.getTime()) /
+            (1000 * 60 * 60);
+
+          if (diffInHours > 0 && diffInHours <= 6) {
+            const timeString = nearestReservationDate.toLocaleTimeString(
+              "en-GB",
+              {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              },
+            );
+            setNextReservation({
+              date: nearestReservationDate,
+              timeString,
+            });
+          } else {
+            setNextReservation(null);
+          }
+
           const availableTimeMs =
-            resDate.getTime() - currentDateTime.getTime() - 300000; // 5 minutes buffer
+            nearestReservationDate.getTime() -
+            currentDateTime.getTime() -
+            300000; // 5 minutes buffer
           const calculatedAvailableTime = Math.max(
             0,
             Math.floor(availableTimeMs / 60000),
@@ -149,6 +176,7 @@ const ChargeStart = () => {
           setAvailableTime(360);
           setMaxPower(stationDetails.power);
           setIsSOCDisabled(false);
+          setNextReservation(null);
         }
 
         // Reset slider value when available time changes
@@ -179,7 +207,14 @@ const ChargeStart = () => {
         },
       });
     } catch (error) {
-      Alert.alert("Error", "Failed to start charging");
+      if (error.response && error.response.status === 409) {
+        Alert.alert(
+          "Charging in Progress",
+          "You already have an active charging session.",
+        );
+      } else {
+        Alert.alert("Error", "Failed to start charging");
+      }
     }
   };
 
@@ -244,6 +279,15 @@ const ChargeStart = () => {
 
         <Text style={styles.tariff}>Tariff: 100〒/KW</Text>
       </View>
+
+      {/* Display next reservation info if within 6 hours */}
+      {nextReservation && (
+        <View style={styles.nextReservationInfo}>
+          <Text style={styles.nextReservationText}>
+            Next reservation is scheduled at {nextReservation.timeString}.
+          </Text>
+        </View>
+      )}
 
       <View style={styles.chargingLimitSection}>
         <Text style={styles.sectionTitle}>Set charging limitation</Text>
@@ -421,12 +465,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f5f5f5",
-    padding: 15,
+    padding: 10, // Reduced padding
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 15, // Reduced margin
   },
   backButton: {
     fontSize: 24,
@@ -440,9 +484,9 @@ const styles = StyleSheet.create({
   },
   stationInfoCard: {
     backgroundColor: "#fff",
-    padding: 25,
+    padding: 20, // Reduced padding
     borderRadius: 15,
-    marginBottom: 25,
+    marginBottom: 15, // Reduced margin
     alignItems: "center",
     elevation: 3,
     shadowOffset: { width: 0, height: 2 },
@@ -501,9 +545,9 @@ const styles = StyleSheet.create({
   },
   chargingLimitSection: {
     backgroundColor: "#fff",
-    padding: 25,
+    padding: 20, // Reduced padding
     borderRadius: 15,
-    marginBottom: 25,
+    marginBottom: 15, // Reduced margin
     elevation: 3,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -556,10 +600,10 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: "#4c86af",
-    padding: 20,
+    padding: 15, // Reduced padding
     borderRadius: 12,
     alignItems: "center",
-    marginTop: 20,
+    marginTop: 15, // Reduced margin
     elevation: 5,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
@@ -580,6 +624,20 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: "#666",
     textAlign: "center",
+  },
+  nextReservationInfo: {
+    backgroundColor: "#fff8dc",
+    padding: 15,
+    borderRadius: 10,
+    marginVertical: 15,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#ffd700",
+  },
+  nextReservationText: {
+    color: "#8b4513",
+    fontSize: 16,
+    fontWeight: "bold",
   },
 });
 

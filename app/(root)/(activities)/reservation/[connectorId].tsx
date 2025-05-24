@@ -18,7 +18,6 @@ import {
   fetchConnectorDetails,
 } from "@/lib/fetch";
 import { useUser } from "@/contexts/UserContext";
-import { scheduleReservationNotification } from "@/lib/NotificationService";
 
 interface Reservation {
   id: number;
@@ -121,6 +120,18 @@ const ReservationScreen = () => {
     const duration = parseInt(selectedDuration);
     if (duration <= 0) {
       setError("Duration must be a positive number");
+      return;
+    }
+
+    const now = new Date();
+    const selectedDateTime = new Date(selectedDate);
+    selectedDateTime.setHours(
+      selectedTime.getHours(),
+      selectedTime.getMinutes(),
+    );
+
+    if (selectedDateTime <= now) {
+      setError("Selected time is in the past. Please select a future time.");
       return;
     }
 
