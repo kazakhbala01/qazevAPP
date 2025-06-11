@@ -1,32 +1,9 @@
 import { useLocalSearchParams, router } from "expo-router";
 import { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  TextInput,
-} from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
 import { fetchAPI } from "@/lib/fetch";
-import * as Notifications from "expo-notifications";
-
-// Set the notification handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowAlert: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
-
-// Request notification permissions
-const requestNotificationPermissions = async () => {
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === "granted";
-};
+import { startCharging } from "@/lib/fetch";
+import { useUser } from "@/contexts/UserContext";
 
 export default function ReservationDetail() {
   const { reservationId } = useLocalSearchParams<{ reservationId: string }>();
@@ -34,6 +11,50 @@ export default function ReservationDetail() {
   const [newDate, setNewDate] = useState("");
   const [newDuration, setNewDuration] = useState("");
   const [loading, setLoading] = useState(true);
+  const [canStartCharging, setCanStartCharging] = useState(false);
+  const [charging, setCharging] = useState(false);
+  const { user } = useUser();
+
+  // Helper function to format date as dd/mm/yy
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return `${date.getDate().toString().padStart(2, "0")}/${(
+      date.getMonth() + 1
+    )
+      .toString()
+      .padStart(2, "0")}/${date.getFullYear().toString().slice(-2)}`;
+  };
+
+  // Helper function to format time as HH:MM
+  const formatTime = (timeString) => {
+    const [hours, minutes] = timeString.split(":").slice(0, 2);
+    return `${hours.padStart(2, "0")}:${minutes.padStart(2, "0")}`;
+  };
+
+  // Helper function to calculate cost
+  const calculateCost = async (
+    connectorId: number,
+    duration: number,
+  ): Promise<number> => {
+    try {
+      const connector = await fetchAPI(`/connectors/${connectorId}`);
+
+      if (connector && typeof connector.power === "number") {
+        const power = connector.power; // kW
+        const hours = duration / 60;
+        const energyUsed = power * hours; // kWh
+        const cost = energyUsed * 100;
+
+        return Math.round(cost * 100) / 100;
+      } else {
+        console.warn("Invalid or missing connector data");
+        return 0;
+      }
+    } catch (error) {
+      console.error("Error calculating cost:", error);
+      return 0;
+    }
+  };
 
   useEffect(() => {
     const loadReservation = async () => {
@@ -45,8 +66,12 @@ export default function ReservationDetail() {
           setNewDate(response.data.arrival_time);
           setNewDuration(response.data.duration.toString());
 
-          // Schedule notification for upcoming reservation
-          scheduleReservationNotification(response.data);
+          // Calculate cost when reservation is loaded
+          const cost = await calculateCost(
+            response.data.connector_id,
+            response.data.duration,
+          );
+          setReservation((prev) => ({ ...prev, cost }));
         } else {
           Alert.alert("Error", "Reservation not found");
           router.back();
@@ -64,34 +89,7 @@ export default function ReservationDetail() {
     }
   }, [reservationId]);
 
-  // Function to schedule a reservation notification
-  const scheduleReservationNotification = async (reservation) => {
-    const { arrival_time, connector_id } = reservation;
-    const reservationDate = new Date(arrival_time);
-    const now = new Date();
-
-    const diffTime = Math.floor((reservationDate - now) / (1000 * 60));
-
-    if (diffTime > 0 && diffTime <= 15) {
-      try {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: "Upcoming Reservation",
-            body: `Your reservation for connector ${connector_id} starts in ${diffTime} minutes`,
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-            seconds: diffTime * 60,
-          },
-        });
-        console.log(`Notification scheduled for connector ${connector_id}`);
-      } catch (error) {
-        console.error("Error scheduling notification:", error);
-      }
-    }
-  };
-
-  const handleDeleteReservation = async () => {
+  const deleteReservation = async () => {
     try {
       setLoading(true);
       await fetchAPI(`/reservations/${reservationId}`, {
@@ -107,24 +105,56 @@ export default function ReservationDetail() {
     }
   };
 
-  const handleUpdateReservation = async () => {
+  const handleDeleteReservation = async () => {
+    Alert.alert(
+      "Confirm Deletion",
+      "Are you sure you want to delete this reservation?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: deleteReservation,
+        },
+      ],
+    );
+  };
+
+  const handleStartCharging = async () => {
+    if (!reservation) return;
+
     try {
-      setLoading(true);
-      await fetchAPI(`/reservations/${reservationId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          arrival_time: newDate,
-          duration: parseInt(newDuration),
-        }),
-      });
-      Alert.alert("Success", "Reservation updated successfully");
-      router.back();
+      setCharging(true);
+
+      const now = new Date();
+      const reservationDate = new Date(
+        `${reservation.reservation_date}T${reservation.arrival_time}`,
+      );
+      const diffMinutes = Math.abs(now - reservationDate) / (1000 * 60);
+
+      if (diffMinutes > 5) {
+        Alert.alert(
+          "Too Late",
+          "You can only start charging within 5 minutes of your reservation time.",
+        );
+        return;
+      }
+
+      const result = await startCharging(reservation.connector_id, user.id);
+
+      if (result.success) {
+        // Delete the reservation
+        await deleteReservation();
+        // Navigate to the charge page
+        router.push("/(root)/(tabs)/charge");
+      } else {
+        throw new Error("Failed to start charging session");
+      }
     } catch (error) {
-      console.error("Error updating reservation:", error);
-      Alert.alert("Error", "Failed to update reservation");
+      console.error("Error starting charging:", error);
+      Alert.alert("Error", "Failed to start charging. Please try again.");
     } finally {
-      setLoading(false);
+      setCharging(false);
     }
   };
 
@@ -153,64 +183,62 @@ export default function ReservationDetail() {
         <Text style={styles.title}>Reservation Details</Text>
       </View>
 
-      <View style={styles.detailContainer}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Connector:</Text>
-          <Text style={styles.detailValue}>{reservation.connector_id}</Text>
+      <View style={styles.reservationCard}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>RESERVATION DETAIL</Text>
         </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Current Arrival Time:</Text>
-          <Text style={styles.detailValue}>{reservation.arrival_time}</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Current Duration:</Text>
-          <Text style={styles.detailValue}>{reservation.duration} minutes</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Station:</Text>
-          <Text style={styles.detailValue}>{reservation.station_name}</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Location:</Text>
-          <Text style={styles.detailValue}>{reservation.location_name}</Text>
+        <View style={styles.cardContent}>
+          <View style={styles.cardItem}>
+            <Text style={styles.cardLabel}>LOCATION</Text>
+            <Text style={styles.cardValue}>{reservation.location_name}</Text>
+          </View>
+          <View style={styles.cardItem}>
+            <Text style={styles.cardLabel}>DATE</Text>
+            <Text style={styles.cardValue}>{formatDate(new Date())}</Text>
+          </View>
+          <View style={styles.cardItem}>
+            <Text style={styles.cardLabel}>TIME / DURATION</Text>
+            <Text style={styles.cardValue}>
+              {formatTime(reservation.arrival_time)} - {reservation.duration}{" "}
+              minutes
+            </Text>
+          </View>
         </View>
       </View>
 
-      <View style={styles.editContainer}>
-        <View style={styles.inputRow}>
-          <Text style={styles.inputLabel}>New Arrival Time:</Text>
-          <TextInput
-            style={styles.input}
-            value={newDate}
-            onChangeText={setNewDate}
-            placeholder="YYYY-MM-DDTHH:MM:SS"
-          />
+      <View style={styles.summarySection}>
+        <Text style={styles.sectionTitle}>COST SUMMARY</Text>
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryLabel}>Energy Usage</Text>
+          <Text style={styles.summaryValue}>
+            {reservation.cost / 100 || "N/A"} kW
+          </Text>
         </View>
-        <View style={styles.inputRow}>
-          <Text style={styles.inputLabel}>New Duration (minutes):</Text>
-          <TextInput
-            style={styles.input}
-            value={newDuration}
-            onChangeText={setNewDuration}
-            keyboardType="numeric"
-          />
+        <View style={styles.summaryItem}>
+          <Text style={styles.summaryLabel}>Total</Text>
+          <Text style={styles.summaryValue}>
+            {reservation.cost || "N/A"} tenge
+          </Text>
         </View>
       </View>
 
       <View style={styles.buttonContainer}>
         <TouchableOpacity
-          style={styles.updateButton}
-          onPress={handleUpdateReservation}
-          disabled={loading}
+          style={styles.actionButton}
+          onPress={handleStartCharging}
         >
-          <Text style={styles.buttonText}>Update Reservation</Text>
+          <Text style={styles.buttonText}>
+            {charging ? "Starting..." : "Start Charging"}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.deleteButton}
+          style={[styles.actionButton, styles.deleteButton]}
           onPress={handleDeleteReservation}
           disabled={loading}
         >
-          <Text style={styles.buttonText}>Delete Reservation</Text>
+          <Text style={styles.buttonText}>
+            {loading ? "Deleting..." : "Delete Reservation"}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -237,73 +265,81 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "bold",
   },
-  detailContainer: {
-    backgroundColor: "#f5f5f5",
-    padding: 15,
+  reservationCard: {
+    backgroundColor: "#4c86af",
     borderRadius: 10,
+    padding: 20,
     marginBottom: 20,
   },
-  detailRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#ddd",
-  },
-  detailLabel: {
-    fontSize: 16,
-    fontWeight: "bold",
-    width: "40%",
-  },
-  detailValue: {
-    fontSize: 16,
-    color: "#333",
-    width: "60%",
-  },
-  editContainer: {
-    backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-  },
-  inputRow: {
-    flexDirection: "row",
+  cardHeader: {
     marginBottom: 15,
   },
-  inputLabel: {
+  cardTitle: {
+    color: "#fff",
     fontSize: 16,
     fontWeight: "bold",
-    width: "40%",
-    paddingTop: 5,
   },
-  input: {
-    width: "60%",
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 5,
+  cardContent: {
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    padding: 15,
   },
-  buttonContainer: {
+  cardItem: {
     flexDirection: "row",
     justifyContent: "space-between",
+    marginBottom: 10,
   },
-  updateButton: {
-    backgroundColor: "#2196f3",
-    padding: 12,
-    borderRadius: 8,
-    width: "48%",
+  cardLabel: {
+    color: "#555",
+    fontSize: 14,
   },
-  deleteButton: {
-    backgroundColor: "#ff4d4d",
-    padding: 12,
+  cardValue: {
+    color: "#333",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
+  sectionSubtitle: {
+    color: "#777",
+    marginBottom: 15,
+  },
+  summarySection: {
+    marginBottom: 20,
+  },
+  summaryItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  summaryLabel: {
+    color: "#555",
+  },
+  summaryValue: {
+    color: "#333",
+    fontWeight: "bold",
+  },
+  buttonContainer: {
+    marginTop: 20,
+  },
+  actionButton: {
+    backgroundColor: "#4CAF50",
+    padding: 15,
     borderRadius: 8,
-    width: "48%",
+    alignItems: "center",
   },
   buttonText: {
     color: "#fff",
-    textAlign: "center",
+    fontSize: 16,
     fontWeight: "bold",
+  },
+  deleteButton: {
+    backgroundColor: "#e74c3c", // Red color for delete
+    marginTop: 10,
   },
 });

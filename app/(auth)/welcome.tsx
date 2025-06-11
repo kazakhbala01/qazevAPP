@@ -27,7 +27,7 @@ const Onboarding = () => {
       />
       <TouchableOpacity
         onPress={() => {
-          router.push(`/(root)/(tabs)/home`);
+          router.push(`/(auth)/sign-in`);
         }}
         className="w-full flex justify-end items-end p-5"
       >

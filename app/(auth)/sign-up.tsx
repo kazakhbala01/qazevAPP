@@ -1,4 +1,3 @@
-// SignUp.tsx
 import { useState } from "react";
 import { View, Text, ScrollView, Alert, Image } from "react-native";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,8 +8,11 @@ import InputField from "@/components/InputField";
 import CustomButton from "@/components/CustomButton";
 import { icons, images } from "@/constants";
 import { ReactNativeModal } from "react-native-modal";
+import React from "react";
 
 const SignUp = () => {
+  const [isVerificationStep, setIsVerificationStep] = useState(false);
+  const [code, setCode] = useState("");
   const { storeToken } = useAuth();
   const { setUser } = useUser();
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -54,26 +56,44 @@ const SignUp = () => {
     return !hasErrors;
   };
 
-  const onSignUpPress = async () => {
+  const handleSignUp = async () => {
     if (!validateForm()) return;
 
     try {
-      const response = await fetchAPI("/sign-up", {
+      await fetchAPI("/sign-up", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
+      });
+      setIsVerificationStep(true);
+    } catch (error) {
+      console.error("Sign-up error:", error);
+      Alert.alert("Signup Error", "Something went wrong. Please try again.");
+    }
+  };
+
+  const verifyCode = async () => {
+    if (!code.trim()) {
+      Alert.alert("Verification Error", "Please enter the verification code");
+      return;
+    }
+
+    try {
+      const response = await fetchAPI("/verify-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.email, code }),
       });
 
       if (response.token && response.user) {
         await storeToken(response.token);
         setUser(response.user);
         setShowSuccessModal(true);
-      } else {
-        Alert.alert("Signup Error", response.error || "Signup failed");
+        router.push(`/(root)/(tabs)/home`);
       }
     } catch (error) {
-      console.error("Sign-up error:", error);
-      Alert.alert("Signup Error", "Something went wrong. Please try again.");
+      console.error("Verification error:", error);
+      Alert.alert("Verification Error", "Invalid or expired verification code");
     }
   };
 
@@ -119,11 +139,20 @@ const SignUp = () => {
           />
           <Text className="text-red-500 text-xs mt-1">{errors.password}</Text>
 
-          <CustomButton
-            title="Sign Up"
-            onPress={onSignUpPress}
-            className="mt-6"
-          />
+          {!isVerificationStep ? (
+            <CustomButton title="Sign Up" onPress={handleSignUp} />
+          ) : (
+            <View>
+              <InputField
+                label="  Verification Code"
+                placeholder="Enter 4-digit code"
+                value={code}
+                onChangeText={setCode}
+                keyboardType="numeric"
+              />
+              <CustomButton title="Verify" onPress={verifyCode} />
+            </View>
+          )}
           <Link
             href="/sign-in"
             className="text-lg text-center text-general-200 mt-10"

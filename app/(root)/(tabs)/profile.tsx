@@ -1,19 +1,68 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useUser } from "@/contexts/UserContext";
+import { fetchAPI } from "@/lib/fetch";
+import { router } from "expo-router";
+import Icon from "react-native-vector-icons/Ionicons";
+
 const Profile = () => {
-  const { user } = useUser();
+  const { user, setUser } = useUser();
+  const [balance, setBalance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleLogout = () => {
+    setUser(null);
+    router.replace("/(auth)/sign-in");
+  };
+
+  const fetchBalance = async () => {
+    if (user) {
+      try {
+        const response = await fetchAPI(`/user-balance/${user.id}`, {
+          method: "GET",
+        });
+
+        if (response.balance) {
+          setBalance(response.balance);
+        }
+      } catch (error) {
+        console.error("Error fetching balance:", error);
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchBalance();
+  }, [user]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchBalance();
+    setRefreshing(false);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#4CAF50"]}
+            tintColor={"#4CAF50"}
+          />
+        }
+      >
+        {/* Header */}
         <View style={styles.header}>
           {user && (
             <>
@@ -23,30 +72,51 @@ const Profile = () => {
           )}
         </View>
 
+        {/* Balance Card */}
         <View style={styles.accountBalanceContainer}>
-          <Text style={styles.accountText}>Balance</Text>
-          <Text style={styles.balanceText}>0₸</Text>
-        </View>
-        <View style={styles.infoContainer}>
-          <Text style={styles.infoLabel}>Information</Text>
-          <TouchableOpacity style={styles.infoButton}>
-            <Text style={styles.infoButtonText}>Charge History</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.infoButton}>
-            <Text style={styles.infoButtonText}>Get Help</Text>
+          <View style={styles.balanceContent}>
+            <Text style={styles.accountText}>Balance</Text>
+            <Text style={styles.balanceText}>{balance}〒</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.topUpButton}
+            onPress={() => router.push("/(root)/(activities)/TopUp")}
+          >
+            <Text style={styles.topUpButtonText}>+</Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.settingsContainer}>
-          <Text style={styles.settingsLabel}>Settings</Text>
-          <TouchableOpacity style={styles.settingsButton}>
-            <Text style={styles.settingsButtonText}>Profile</Text>
+        {/* Information Section */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Information</Text>
+          <TouchableOpacity
+            style={styles.optionRow}
+            onPress={() => router.push("/(root)/(activities)/ChargeHistory")}
+          >
+            <Icon name="receipt-outline" size={20} color="#4CAF50" />
+            <Text style={styles.optionText}>Charge History</Text>
+            <Icon name="chevron-forward" size={18} color="#999" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Settings Section */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Settings</Text>
+          <TouchableOpacity
+            style={[styles.optionRow, styles.logoutRow]}
+            onPress={handleLogout}
+          >
+            <Icon name="log-out-outline" size={20} color="#fc2727" />
+            <Text style={styles.logoutText}>Logout</Text>
+            <Icon name="chevron-forward" size={18} color="#999" />
           </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 };
+
+export default Profile;
 
 const styles = StyleSheet.create({
   container: {
@@ -55,29 +125,13 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingHorizontal: 20,
     paddingBottom: 30,
-    overflow: "hidden",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
   },
   header: {
     alignItems: "center",
     marginBottom: 20,
-  },
-  profilePicture: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 10,
   },
   name: {
     fontSize: 20,
@@ -88,11 +142,17 @@ const styles = StyleSheet.create({
     color: "#666",
   },
   accountBalanceContainer: {
-    backgroundColor: "#F5F5F5F5",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F5F5F5",
     paddingVertical: 15,
     paddingHorizontal: 20,
     borderRadius: 10,
     marginBottom: 20,
+  },
+  balanceContent: {
+    flex: 1,
   },
   accountText: {
     fontSize: 16,
@@ -104,62 +164,54 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#666",
   },
-  discountContainer: {
-    backgroundColor: "#f5f5f5f5",
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    marginBottom: 20,
+  topUpButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#4CAF50",
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 10,
   },
-  discountText: {
-    fontSize: 16,
-    color: "#666",
-    marginBottom: 5,
-  },
-  discountValue: {
+  topUpButtonText: {
+    color: "white",
     fontSize: 20,
     fontWeight: "bold",
-    color: "#4CAF50",
   },
-  infoContainer: {
-    marginBottom: 30,
+  sectionCard: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
   },
-  infoLabel: {
+  sectionTitle: {
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 10,
   },
-  infoButton: {
-    backgroundColor: "#fff",
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 5,
+  optionRow: {
+    flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
-  infoButtonText: {
+  optionText: {
     fontSize: 16,
-    color: "#4CAF50",
+    marginLeft: 10,
+    color: "#333",
   },
-  settingsContainer: {
-    marginBottom: 30,
+  logoutRow: {
+    borderBottomWidth: 0,
   },
-  settingsLabel: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 10,
-  },
-  settingsButton: {
-    backgroundColor: "#fff",
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 5,
-    alignItems: "center",
-  },
-  settingsButtonText: {
+  logoutText: {
     fontSize: 16,
-    color: "#4CAF50",
+    marginLeft: 10,
+    color: "#fc2727",
   },
 });
-
-export default Profile;

@@ -15,6 +15,8 @@ const Layout = () => {
         name="reservation/details/[reservationId]"
         options={{ headerShown: false }}
       />
+      <Stack.Screen name="ChargeHistory" options={{ headerShown: false }} />
+      <Stack.Screen name="[chargeHistoryId]" options={{ headerShown: false }} />
     </Stack>
   );
 };

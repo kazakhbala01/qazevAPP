@@ -75,21 +75,16 @@ export const styles = StyleSheet.create({
     backgroundColor: "white",
   },
   stationMarker: {
-    height: 38,
-    width: 38,
-    borderRadius: 25,
+    height: 28,
+    width: 28,
+    borderRadius: 14,
     borderWidth: 3,
     backgroundColor: "white",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   stationPower: {
-    fontSize: 12,
+    fontSize: 8,
     fontWeight: "bold",
     color: "#000",
     textAlign: "center",
@@ -170,13 +165,13 @@ export const styles = StyleSheet.create({
     flexWrap: "wrap", // Allow cards to wrap on smaller screens
   },
   connectorCard: {
-    width: 164, // Fixed width
-    height: 164, // Fixed height to make it square
+    width: 150, // Fixed width
+    height: 150, // Fixed height to make it square
     borderWidth: 2,
     borderColor: "#ddd",
     borderRadius: 10,
     padding: 15,
-    margin: 10, // Increased space between cards
+    margin: 4, // Increased space between cards
     marginBottom: 10,
     backgroundColor: "#f9f9f9", // Light background for better visibility
     justifyContent: "space-between",

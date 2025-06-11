@@ -38,7 +38,7 @@ export default function Layout() {
           paddingBottom: 0, // ios only
           overflow: "hidden",
           marginHorizontal: 10,
-          marginBottom: 20,
+          marginBottom: 30,
           height: 90,
           display: "flex",
           justifyContent: "space-between",

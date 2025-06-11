@@ -273,22 +273,6 @@ const Home = () => {
         initialRegion={defaultRegion}
         showsUserLocation
       >
-        {/* Current User Location Marker */}
-        {location && (
-          <Marker
-            coordinate={{
-              latitude: location.latitude,
-              longitude: location.longitude,
-            }}
-            title="You are here"
-            description="Current Location"
-          >
-            <View style={styles.userMarker}>
-              <View style={styles.userMarkerInner} />
-            </View>
-          </Marker>
-        )}
-
         {/* Locations Markers */}
         {locations?.map((loc) =>
           loc.stations.map((station) => (

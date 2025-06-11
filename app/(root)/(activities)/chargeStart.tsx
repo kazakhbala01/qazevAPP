@@ -199,13 +199,7 @@ const ChargeStart = () => {
         `Transaction ID: ${result.transactionId}`,
       );
 
-      router.push({
-        pathname: "/(root)/(tabs)/charge",
-        params: {
-          connectorId: parsedConnectorId,
-          transactionId: result.transactionId,
-        },
-      });
+      router.push("/(root)/(tabs)/charge");
     } catch (error) {
       if (error.response && error.response.status === 409) {
         Alert.alert(

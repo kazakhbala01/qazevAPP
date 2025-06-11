@@ -100,7 +100,7 @@ function startChargingSimulation() {
         },
       ]),
     );
-  }, 1000);
+  }, 2000);
 }
 
 ws.on("close", () => {

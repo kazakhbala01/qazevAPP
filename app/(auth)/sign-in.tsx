@@ -1,4 +1,3 @@
-// SignIn.tsx
 import { useState } from "react";
 import { View, Text, ScrollView, Alert } from "react-native";
 import { useAuth } from "@/contexts/AuthContext";
@@ -61,7 +60,7 @@ const SignIn = () => {
       if (response.token && response.user) {
         await storeToken(response.token);
         setUser(response.user);
-        router.push(`/(root)/(tabs)/home`);
+        router.replace(`/(root)/(tabs)/home`);
       } else {
         Alert.alert("Login Error", response.error || "Invalid credentials");
       }

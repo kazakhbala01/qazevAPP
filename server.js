@@ -6,6 +6,7 @@ import { WebSocketServer } from "ws";
 import dotenv from "dotenv";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import nodemailer from "nodemailer";
 
 const { Pool } = pg;
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
@@ -22,7 +23,30 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || "5432", 10),
 });
 
-//User
+//email
+
+const transporter = nodemailer.createTransport({
+  service: "gmail", // or your email provider
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+async function sendVerificationEmail(email, code) {
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Your Verification Code",
+      text: `Your verification code is: ${code}. This code expires in 10 minutes.`,
+    });
+    console.log(`Verification email sent to ${email}`);
+  } catch (error) {
+    console.error("Error sending email:", error);
+    throw error;
+  }
+}
 
 // Function to hash passwords
 async function hashPassword(password) {
@@ -98,6 +122,10 @@ app.post("/api/sign-in", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
+    if (!user.email_verified) {
+      return res.status(401).json({ error: "Email not verified" });
+    }
+
     // Compare password
     const isMatch = await comparePasswords(password, user.password_hash);
 
@@ -144,16 +172,29 @@ app.post("/api/sign-up", async (req, res) => {
     const {
       rows: [newUser],
     } = await pool.query(
-      "INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING *",
+      "INSERT INTO users (name, email, password_hash, email_verified) VALUES ($1, $2, $3, FALSE) RETURNING *",
       [name, email, passwordHash],
     );
 
-    // Create token
-    const token = createToken(newUser);
+    // Send verification email
+    const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+    const expiration = new Date();
+    expiration.setMinutes(expiration.getMinutes() + 10); // 10-minute expiration
+
+    await pool.query(
+      `
+      UPDATE users 
+      SET verification_code = $1, 
+          code_expiration = $2
+      WHERE id = $3
+    `,
+      [verificationCode, expiration, newUser.id],
+    );
+
+    await sendVerificationEmail(email, verificationCode);
 
     res.status(201).json({
-      token,
-      user: { id: newUser.id, name: newUser.name, email: newUser.email },
+      message: "User created. Check your email for verification code.",
     });
   } catch (err) {
     console.error("Error signing up:", err);
@@ -296,20 +337,46 @@ app.get("/api/active-charge/:userId", async (req, res) => {
   const { userId } = req.params;
 
   try {
-    // Fetch active charging session for the user
-    const activeSession = await pool.query(
-      "SELECT * FROM charging_sessions WHERE user_id = $1 AND status = $2",
-      [userId, "in use"],
+    const { rows } = await pool.query(
+      "SELECT cs.id, cs.connector_id, cs.user_id, cs.transaction_id, cs.start_time, cs.status, c.power FROM charging_sessions cs JOIN connectors c ON cs.connector_id = c.id WHERE cs.user_id = $1 AND cs.status = 'in use'",
+      [userId],
     );
 
-    if (activeSession.rows.length > 0) {
-      res.json(activeSession.rows[0]); // Return the active session
-    } else {
-      res.status(404).json({ error: "No active charging session" });
+    if (rows.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, error: "No active session found" });
     }
-  } catch (err) {
-    console.error("Error fetching active charging session:", err);
-    res.status(500).json({ error: "Server error" });
+
+    const session = rows[0];
+    const currentTime = Date.now();
+    const sessionStartTime = new Date(session.start_time).getTime();
+    const timeElapsedMs = currentTime - sessionStartTime;
+    const timeElapsedHours = 0;
+    const currentEnergy = timeElapsedHours * session.power;
+    const soc = Math.min(60, Math.floor((currentEnergy / 60) * 100)); // Assuming default vehicle capacity of 60 kWh
+    const totalCost = currentEnergy * 100; // Assuming 100〒/kWh
+
+    const response = {
+      success: true,
+      data: {
+        soc,
+        energy_consumed: currentEnergy,
+        total_cost: totalCost,
+        elapsed_time: timeElapsedMs / 60000, // in minutes
+        time_remaining: 0,
+        connector_id: session.connector_id,
+        transaction_id: session.transaction_id,
+      },
+    };
+
+    console.log("API Response:", response);
+    res.json(response);
+  } catch (error) {
+    console.error("Error fetching active session:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch active session" });
   }
 });
 
@@ -318,7 +385,9 @@ app.post("/api/start-charge", async (req, res) => {
   const { connectorId, userId } = req.body;
 
   if (!connectorId || !userId) {
-    return res.status(400).json({ error: "Missing required fields" });
+    return res
+      .status(400)
+      .json({ success: false, error: "Missing required fields" });
   }
 
   try {
@@ -329,28 +398,29 @@ app.post("/api/start-charge", async (req, res) => {
     );
 
     if (activeSession.rows.length > 0) {
-      return res
-        .status(409)
-        .json({ error: "User already has an active charging session" });
+      return res.status(409).json({
+        success: false,
+        error: "User already has an active charging session",
+      });
     }
 
     // Check if connector is available
     const connector = await getConnector(connectorId);
     if (!connector || connector.status !== "available") {
-      return res.status(409).json({ error: "Connector not available" });
+      return res
+        .status(409)
+        .json({ success: false, error: "Connector not available" });
     }
 
     // Create transaction
-    const transactionId = `TXN-${Date.now()}-${Math.floor(
-      Math.random() * 1000,
-    )}`;
+    const transactionId = `TXN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     // Update connector status to "in use"
     await updateConnectorStatus(connectorId, "in use");
 
     // Create charging session
     await pool.query(
-      "INSERT INTO charging_sessions (connector_id, user_id, transaction_id, status) VALUES ($1, $2, $3, $4)",
+      "INSERT INTO charging_sessions (connector_id, user_id, transaction_id, status, start_time) VALUES ($1, $2, $3, $4, NOW())",
       [connectorId, userId, transactionId, "in use"],
     );
 
@@ -367,27 +437,22 @@ app.post("/api/start-charge", async (req, res) => {
       );
     }
 
-    res.json({ transactionId });
+    res.json({ success: true, transactionId });
   } catch (error) {
     console.error("Error starting charge:", error);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ success: false, error: "Server error" });
   }
 });
+
 // Stop charging via OCPP
 app.post("/api/stop-charge", async (req, res) => {
-  const { connectorId, transactionId } = req.body;
+  const { userId, connectorId, transactionId } = req.body;
 
-  if (!connectorId || !transactionId) {
+  if (!userId || !connectorId || !transactionId) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
-    // Check if connector exists
-    const connector = await getConnector(connectorId);
-    if (!connector) {
-      return res.status(404).json({ error: "Connector not found" });
-    }
-
     // Update connector status to "available"
     await updateConnectorStatus(connectorId, "available");
 
@@ -397,13 +462,60 @@ app.post("/api/stop-charge", async (req, res) => {
       ["out of service", transactionId, "in use"],
     );
 
-    // Notify charging point via OCPP
-    if (wss) {
-      broadcastRemoteStopTransaction(wss, transactionId);
-      console.log(
-        `OCPP: RemoteStopTransaction sent for transaction ${transactionId}`,
-      );
+    // Calculate consumption and cost
+    const { rows: sessionRows } = await pool.query(
+      `
+      SELECT 
+        cs.start_time,
+        c.power
+      FROM charging_sessions cs
+      JOIN connectors c ON cs.connector_id = c.id
+      WHERE cs.transaction_id = $1 AND cs.user_id = $2
+      `,
+      [transactionId, userId],
+    );
+
+    if (sessionRows.length === 0) {
+      return res.status(404).json({ error: "Charging session not found" });
     }
+
+    const session = sessionRows[0];
+    const durationInHours =
+      (Date.now() - new Date(session.start_time).getTime()) / (1000 * 60 * 60);
+    const energyConsumed = durationInHours * session.power;
+    const totalCost = Math.round(energyConsumed * 100); // Round to nearest integer
+
+    // Add to charge history
+    await pool.query(
+      `
+      INSERT INTO charge_history (
+        user_id,
+        session_id,
+        connector_id,
+        start_time,
+        end_time,
+        energy_consumed,
+        total_cost
+      )
+      VALUES (
+        $1,
+        (SELECT id FROM charging_sessions WHERE transaction_id = $2),
+        $3,
+        $4,
+        NOW(),
+        $5,
+        $6
+      )
+      `,
+      [
+        parseInt(userId),
+        transactionId,
+        parseInt(connectorId),
+        session.start_time,
+        parseFloat(energyConsumed.toFixed(2)),
+        totalCost, // Use the rounded integer value
+      ],
+    );
 
     res.json({ success: true });
   } catch (error) {
@@ -486,7 +598,6 @@ function broadcastMeterUpdate(connectorId, meterValue) {
     return;
   }
 
-  // Get the active transaction ID for the connector
   getActiveTransactionId(connectorId).then((transactionId) => {
     if (!transactionId) {
       console.error("No active transaction for connector", connectorId);
@@ -507,7 +618,6 @@ function broadcastMeterUpdate(connectorId, meterValue) {
     });
   });
 }
-
 // Broadcast RemoteStartTransaction to all connected charge points
 function broadcastRemoteStartTransaction(
   wss,
@@ -762,8 +872,9 @@ app.get("/api/user-reservations", async (req, res) => {
       r.duration,
       r.reservation_date,
       r.connector_id,
-      s.station_number AS station_name,  -- Use station_number from stations if needed
-      l.name AS location_name
+      s.station_number AS station_name,
+      l.name AS location_name,
+      c.connector_type
     FROM reservations r
     LEFT JOIN connectors c ON r.connector_id = c.id
     LEFT JOIN stations s ON c.station_id = s.id
@@ -779,6 +890,7 @@ app.get("/api/user-reservations", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
 app.post("/api/start-session", async (req, res) => {
   try {
     const { connectorId, userId } = req.body;
@@ -864,31 +976,89 @@ app.post("/api/stop-session", async (req, res) => {
   }
 });
 
-app.get("/api/active-session/:connectorId", async (req, res) => {
-  const { connectorId } = req.params;
-
-  // Validate connectorId
-  const parsedConnectorId = parseInt(connectorId);
-  if (isNaN(parsedConnectorId)) {
-    return res.status(400).json({ error: "Invalid connectorId" });
-  }
+//emailchik validationchik)
+app.post("/api/request-verification", async (req, res) => {
+  const { email } = req.body;
 
   try {
-    const { rows } = await pool.query(
-      "SELECT cs.*, c.power, c.station_id FROM charging_sessions cs JOIN connectors c ON cs.connector_id = c.id WHERE cs.connector_id = $1 AND cs.status = 'in use'",
-      [parsedConnectorId],
-    );
+    // Find user by email
+    const {
+      rows: [user],
+    } = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "No active session found" });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
     }
 
-    rows[0].vehicle_capacity = 60; // kWh
+    // Generate 4-digit verification code
+    const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+    const expiration = new Date();
+    expiration.setMinutes(expiration.getMinutes() + 10); // 10-minute expiration
 
-    res.json(rows[0]);
-  } catch (error) {
-    console.error("Error fetching active session:", error);
-    res.status(500).json({ error: "Failed to fetch active session" });
+    // Update user with verification code
+    await pool.query(
+      `
+      UPDATE users 
+      SET verification_code = $1, 
+          code_expiration = $2
+      WHERE id = $3
+    `,
+      [verificationCode, expiration, user.id],
+    );
+
+    // Send email with verification code
+    await sendVerificationEmail(email, verificationCode);
+
+    res.json({ success: true, message: "Verification code sent" });
+  } catch (err) {
+    console.error("Error sending verification code:", err);
+    res.status(500).json({ error: "Failed to send verification code" });
+  }
+});
+
+app.post("/api/verify-code", async (req, res) => {
+  const { email, code } = req.body;
+
+  try {
+    // Find user by email
+    const {
+      rows: [user],
+    } = await pool.query(
+      `
+      SELECT * FROM users 
+      WHERE email = $1 
+      AND verification_code = $2 
+      AND code_expiration > NOW()
+    `,
+      [email, code],
+    );
+
+    if (!user) {
+      return res.status(401).json({ error: "Invalid verification code" });
+    }
+
+    // Clear verification code after use
+    await pool.query(
+      `
+      UPDATE users 
+      SET verification_code = NULL, 
+          code_expiration = NULL,
+          email_verified = TRUE
+      WHERE id = $1
+    `,
+      [user.id],
+    );
+
+    // Create token
+    const token = createToken(user);
+
+    res.json({
+      token,
+      user: { id: user.id, name: user.name, email: user.email },
+    });
+  } catch (err) {
+    console.error("Error verifying code:", err);
+    res.status(500).json({ error: "Failed to verify code" });
   }
 });
 
@@ -904,6 +1074,325 @@ async function getActiveTransactionId(connectorId) {
     return null;
   }
 }
+
+app.get("/api/user-balance/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      "SELECT balance FROM user_balances WHERE user_id = $1",
+      [userId],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "User balance not found" });
+    }
+
+    res.json({ balance: rows[0].balance });
+  } catch (err) {
+    console.error("Error fetching user balance:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/top-up-balance", async (req, res) => {
+  const { userId, amount } = req.body;
+  console.log(
+    `Received top-up request for user ${userId} with amount ${amount}`,
+  );
+
+  if (!userId || !amount) {
+    return res
+      .status(400)
+      .json({ success: false, error: "Missing required fields" });
+  }
+
+  if (amount <= 0) {
+    return res
+      .status(400)
+      .json({ success: false, error: "Amount must be positive" });
+  }
+
+  try {
+    await pool.query("BEGIN");
+
+    try {
+      const { rows } = await pool.query(
+        `
+        INSERT INTO user_balances (user_id, balance)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+          balance = user_balances.balance + EXCLUDED.balance,
+          last_updated = NOW()
+        RETURNING balance
+      `,
+        [userId, amount],
+      );
+
+      await pool.query("COMMIT");
+
+      res.json({ success: true, data: { balance: rows[0].balance } });
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      console.error("Error during balance update:", error);
+      res.status(500).json({
+        success: false,
+        error: "Server error",
+        details: error.message,
+      });
+    }
+  } catch (err) {
+    console.error("Error topping up balance:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "Server error", details: err.message });
+  }
+});
+
+app.post("/api/update-balance", async (req, res) => {
+  const { userId, amount } = req.body;
+
+  if (!userId || !amount) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    // Start a transaction
+    await pool.query("BEGIN");
+
+    try {
+      // Update the user balance
+      const { rows } = await pool.query(
+        `
+        INSERT INTO user_balances (user_id, balance)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+          balance = user_balances.balance + EXCLUDED.balance,
+          last_updated = NOW()
+        RETURNING balance
+      `,
+        [userId, amount],
+      );
+
+      // Commit the transaction
+      await pool.query("COMMIT");
+
+      res.json({ balance: rows[0].balance });
+    } catch (error) {
+      // Rollback the transaction on error
+      await pool.query("ROLLBACK");
+      throw error;
+    }
+  } catch (err) {
+    console.error("Error updating user balance:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/deduct-balance", async (req, res) => {
+  const { userId, cost } = req.body;
+
+  if (!userId || !cost) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    // Start a transaction
+    await pool.query("BEGIN");
+
+    try {
+      // Check if the user has sufficient balance
+      const { rows } = await pool.query(
+        "SELECT balance FROM user_balances WHERE user_id = $1 FOR UPDATE",
+        [userId],
+      );
+
+      if (rows.length === 0) {
+        await pool.query("ROLLBACK");
+        return res.status(404).json({ error: "User balance not found" });
+      }
+
+      const currentBalance = rows[0].balance;
+
+      if (currentBalance < cost) {
+        await pool.query("ROLLBACK");
+        return res.status(400).json({ error: "Insufficient balance" });
+      }
+
+      // Deduct the charging cost
+      await pool.query(
+        `
+        UPDATE user_balances
+        SET balance = balance - $1, last_updated = NOW()
+        WHERE user_id = $2
+        RETURNING balance
+      `,
+        [cost, userId],
+      );
+
+      // Commit the transaction
+      await pool.query("COMMIT");
+
+      res.json({ success: true });
+    } catch (error) {
+      // Rollback the transaction on error
+      await pool.query("ROLLBACK");
+      throw error;
+    }
+  } catch (err) {
+    console.error("Error deducting balance:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+//charging historyyyyyy
+
+// Add charge history entry
+app.post("/api/add-charge-history", async (req, res) => {
+  const { userId, session_id, connectorId, energyConsumed, totalCost } =
+    req.body;
+
+  if (!userId || !connectorId || !energyConsumed || !totalCost) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+      INSERT INTO charge_history (
+        user_id,
+        session_id,
+        connector_id,
+        start_time,
+        end_time,
+        energy_consumed,
+        total_cost
+      )
+      SELECT
+        $1,
+        $2,
+        $3,
+        cs.start_time,
+        NOW(),
+        $4,
+        $5
+      FROM charging_sessions cs
+      WHERE cs.id = $2 AND cs.user_id = $1
+      RETURNING *
+      `,
+      [userId, session_id, connectorId, energyConsumed, totalCost],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Charging session not found" });
+    }
+
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    console.error("Error adding charge history:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Get charge history for user
+app.get("/api/charge-history/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT
+        ch.id,
+        ch.start_time,
+        ch.end_time,
+        ch.energy_consumed,
+        ch.total_cost,
+        c.station_id,
+        s.location_id,
+        l.name AS location_name
+      FROM charge_history ch
+      JOIN connectors c ON ch.connector_id = c.id
+      JOIN stations s ON c.station_id = s.id
+      JOIN locations l ON s.location_id = l.id
+      WHERE ch.user_id = $1
+      ORDER BY ch.start_time DESC
+      `,
+      [userId],
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Error fetching charge history:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Get detailed charge history entry
+app.get("/api/charge-history-detail/:historyId", async (req, res) => {
+  const { historyId } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT
+        ch.*,
+        c.station_id,
+        s.location_id,
+        l.name AS location_name
+      FROM charge_history ch
+      JOIN connectors c ON ch.connector_id = c.id
+      JOIN stations s ON c.station_id = s.id
+      JOIN locations l ON s.location_id = l.id
+      WHERE ch.id = $1
+      `,
+      [historyId],
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "History entry not found" });
+    }
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error("Error fetching charge history detail:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+async function deleteExpiredReservations() {
+  try {
+    await pool.query(`
+      DELETE FROM reservations
+      WHERE 
+        to_timestamp(
+          to_char(current_date, 'YYYY-MM-DD') || ' ' || arrival_time,
+          'YYYY-MM-DD HH24:MI:SS'
+        ) + INTERVAL '5 minutes' < NOW()
+        AND id NOT IN (
+          SELECT r.id
+          FROM reservations r
+          JOIN charging_sessions cs ON r.connector_id = cs.connector_id
+          WHERE cs.user_id = r.user_id
+            AND cs.status = 'in use'
+            AND cs.start_time BETWEEN to_timestamp(
+              to_char(current_date, 'YYYY-MM-DD') || ' ' || r.arrival_time,
+              'YYYY-MM-DD HH24:MI:SS'
+            ) AND to_timestamp(
+              to_char(current_date, 'YYYY-MM-DD') || ' ' || r.arrival_time,
+              'YYYY-MM-DD HH24:MI:SS'
+            ) + INTERVAL '5 minutes'
+        )
+    `);
+  } catch (error) {
+    console.error("Error deleting expired reservations:", error);
+  }
+}
+
+// Run every minute
+setInterval(deleteExpiredReservations, 60000);
+
 // Start server
 const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
